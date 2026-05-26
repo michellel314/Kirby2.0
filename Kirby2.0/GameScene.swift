@@ -30,7 +30,19 @@ class GameScene: SKScene {
     private func setupPlayer(){
         let player = SKSpriteNode(imageNamed: "tile000")
         player.position = CGPoint(x: 50 + player.size.width, y: player.size.height + 20)
+        player.setScale(1.5)
         
+        // set up animation
+        let textureAtlas = SKTextureAtlas(named: "Kirby")
+        var playerAnimation = [SKTexture]()
+        for i in 0..<textureAtlas.textureNames.count {
+            let name = "tile00\(i)"
+            playerAnimation.append(textureAtlas.textureNamed(name))
+        }
+        
+        let animation = SKAction.animate(with: playerAnimation, timePerFrame: 0.15)
+        let repeatForever = SKAction.repeatForever(animation)
+        player.run(repeatForever)
         addChild(player)
     }
 }
