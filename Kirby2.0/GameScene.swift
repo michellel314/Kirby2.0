@@ -14,6 +14,7 @@ class GameScene: SKScene {
     override func didMove(to view: SKView){
         setupScene()
         setupPlayer()
+        setupBackground(imageName: "Dreamscape")
         
     }
     
@@ -31,7 +32,7 @@ class GameScene: SKScene {
         let player = SKSpriteNode(imageNamed: "tile000")
         player.position = CGPoint(x: 50 + player.size.width, y: player.size.height + 20)
         player.setScale(1.5)
-        
+        player.zPosition = 4
         // set up animation
         let textureAtlas = SKTextureAtlas(named: "Kirby")
         var playerAnimation = [SKTexture]()
@@ -44,5 +45,20 @@ class GameScene: SKScene {
         let repeatForever = SKAction.repeatForever(animation)
         player.run(repeatForever)
         addChild(player)
+    }
+    
+    private func setupBackground(imageName : String){
+        let layer = SKSpriteNode(imageNamed: imageName)
+        
+        // calculate scaled size
+        let heightRatio = size.height / layer.size.height
+        let layerHeight = size.height
+        let layerWidth = layer.size.width * heightRatio
+        let layerSize = CGSize(width: layerWidth, height: layerHeight)
+        layer.size = layerSize
+        layer.position = CGPoint(x: 0, y: 0)
+        layer.anchorPoint = .zero
+        layer.zPosition = 1
+        addChild(layer)
     }
 }
