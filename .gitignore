@@ -1,0 +1,4 @@
+# Xcode per-user config
+xcuserdata/
+*.xcuserstate
+*.xcuserdatad
