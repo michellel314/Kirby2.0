@@ -13,11 +13,14 @@ import SpriteKit
 class GameScene: SKScene, SKPhysicsContactDelegate{
     private var player = SKSpriteNode(imageNamed: "tile000")
     private var isJumping = false
+    private var timer = Timer()
+    private var platformTimer = Timer()
     override func didMove(to view: SKView){
         setupScene()
         setupPlayer()
         setupGround()
         spawnEnemy()
+        spawnPlatform()
         setupBackground(imageName: "Dreamscape", duration: 10, zPos: 1, scale: 1)
         
     }
@@ -44,7 +47,11 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
     
     //SKPhysicsContactDelegate delegate method
     func didBegin(_ contact: SKPhysicsContact){
-        print("contact!")
+        guard let node1 = contact.bodyA.node else { return }
+        guard let node2 = contact.bodyB.node else { return }
+        if (node1 == player && node2.name == "enemy") || (node2 == player && node1.name == "enemy"){
+            gameOver()
+        }
     }
     
     private func setupScene(){
@@ -55,6 +62,9 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         size = view!.bounds.size
         physicsWorld.gravity = CGVector(dx: 0, dy: -9.8)
         physicsWorld.contactDelegate = self
+        timer = Timer.scheduledTimer(timeInterval: 3, target: self, selector: #selector(spawnEnemy), userInfo: nil, repeats: true)
+        platformTimer = Timer.scheduledTimer(timeInterval: 5, target: self, selector: #selector(spawnPlatform), userInfo: nil, repeats: true)
+        
     }
     
     
@@ -63,10 +73,11 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         player.position = CGPoint(x: 200, y: 11)
         player.setScale(1)
         player.zPosition = 4
-        
-        player.physicsBody = SKPhysicsBody(rectangleOf: player.size)
+        let interactiveRect = CGSize(width: player.size.width / 2, height: player.size.height)
+        player.physicsBody = SKPhysicsBody(rectangleOf: interactiveRect)
         player.physicsBody?.isDynamic = true
         player.physicsBody?.allowsRotation = false
+        player.physicsBody?.contactTestBitMask = 1
         runAnimation()
         addChild(player)
     }
@@ -149,15 +160,17 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         player.run(repeatForever)
     }
     
-    private func spawnEnemy() {
+    @objc private func spawnEnemy() {
         let enemy = SKSpriteNode(imageNamed: "King DEDEDE")
         enemy.position = CGPoint(x: size.width + enemy.size.width, y: 11)
         enemy.setScale(2)
         enemy.zPosition = 4
-        enemy.physicsBody = SKPhysicsBody(rectangleOf: enemy.size)
+        let interactiveRect = CGSize(width: enemy.size.width / 2, height: enemy.size.height)
+        enemy.physicsBody = SKPhysicsBody(rectangleOf: interactiveRect)
         enemy.physicsBody?.isDynamic = true
         enemy.physicsBody?.allowsRotation = false
         enemy.physicsBody?.affectedByGravity = false
+        enemy.physicsBody?.contactTestBitMask = 1
         let move = SKAction.moveTo(x: -enemy.size.width, duration: 5)
         let remove = SKAction.removeFromParent()
         let sequence = SKAction.sequence([move, remove])
@@ -177,6 +190,35 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         enemy.run(repeatForever)
     }
 
+
+    private func gameOver() {
+        player.removeFromParent()
+        timer.invalidate()
+        platformTimer.invalidate()
+        
+        let gameOverLabel = SKLabelNode(fontNamed: "Chalkduster")
+        gameOverLabel.text = "Game Over"
+        gameOverLabel.fontColor = .red
+        gameOverLabel.fontSize = 48
+        gameOverLabel.zPosition = 5
+        gameOverLabel.position = CGPoint(x: size.width / 2, y: size.height / 2)
+        addChild(gameOverLabel)
+    }
+
+    @objc private func spawnPlatform() {
+        let platform = SKSpriteNode(color: .red, size: CGSize(width: 200, height: 5))
+        platform.position = CGPoint(x: size.width + platform.size.width, y: 100)
+        platform.zPosition = 4
+        platform.physicsBody = SKPhysicsBody(rectangleOf: platform.size)
+        platform.physicsBody?.isDynamic = false
+            
+        let move = SKAction.moveTo(x: -platform.size.width, duration: 10)
+        let remove = SKAction.removeFromParent()
+        let sequence = SKAction.sequence([move, remove])
+        platform.run(sequence)
+            
+        addChild(platform)
+    }
 
     
 }
