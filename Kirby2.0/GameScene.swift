@@ -13,16 +13,23 @@ import SpriteKit
 class GameScene: SKScene, SKPhysicsContactDelegate{
     private var player = SKSpriteNode(imageNamed: "tile000")
     private var isJumping = false
+    private var jumpCount = 0
+    private var isMoving = false
+    
+    private let playerCategory: UInt32 = 0x1 << 0
+    private let groundCategory: UInt32 = 0x1 << 1
     override func didMove(to view: SKView){
         setupScene()
         setupPlayer()
         setupGround()
-        spawnEnemy()
+        //spawnEnemy()
         setupBackground(imageName: "Dreamscape", duration: 10, zPos: 1, scale: 1)
         
     }
     
     override func update(_ currentTime: TimeInterval){
+
+        
         if player.position.y > size.height / 2 {
             isJumping = false
         }
@@ -33,18 +40,70 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
     }
     
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?){
-        isJumping = true
-        jumpAnimation()
+        if jumpCount < 2 {
+            if player.physicsBody?.velocity.dy == 0 {
+                isJumping = true
+                jumpCount += 1
+                jumpAnimation()
+            }
+        }
+        
+    
     }
     
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?){
         isJumping = false
-        runAnimation()
+        // Removed runAnimation() from here so Kirby stays in his jump animation while mid-air
     }
     
     //SKPhysicsContactDelegate delegate method
     func didBegin(_ contact: SKPhysicsContact){
-        print("contact!")
+        //Combine the two contacting bodies into a mask
+        let collision = contact.bodyA.categoryBitMask | contact.bodyB.categoryBitMask
+        
+        //If the player and the ground have officially collided
+        if collision == (playerCategory | groundCategory){
+            jumpCount = 0 // Reset jumps  back to 0 on landing
+            runAnimation() // Kirby has landed safely so resume the walking
+        }
+    }
+    
+    
+    func movePlayer(_ input: CGSize){
+        let deadzone: CGFloat = 5
+
+        if abs(input.width) < deadzone {
+
+            isMoving = false
+
+            player.removeAction(forKey:"walking")
+
+            player.texture =
+                SKTexture(imageNamed:"walking000")
+
+            return
+        }
+
+        isMoving = true
+
+        let speed: CGFloat = 0.08
+
+        player.position.x += input.width * speed
+        player.position.x = max(0, min(player.position.x, size.width))
+
+        if input.width > 0 {
+
+            player.xScale = abs(player.xScale)
+
+        } else {
+
+            player.xScale = -abs(player.xScale)
+        }
+
+        if player.action(forKey:"walking") == nil {
+
+            runAnimation()
+        }
     }
     
     private func setupScene(){
@@ -59,15 +118,21 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
     
     
     private func setupPlayer(){
-        
-        player.position = CGPoint(x: 200, y: 11)
-        player.setScale(1)
+
+        player.position = CGPoint(x: 200, y: 100) // Spawns cleanly above the floor line
+        player.setScale(0.5)
         player.zPosition = 4
         
         player.physicsBody = SKPhysicsBody(rectangleOf: player.size)
         player.physicsBody?.isDynamic = true
         player.physicsBody?.allowsRotation = false
-        runAnimation()
+        
+        //Tell the physics world that this body belongs to the "player"
+        player.physicsBody?.categoryBitMask = playerCategory
+        //Tell the physics world to alert "didBegin" when touching the ground
+        player.physicsBody?.contactTestBitMask = groundCategory
+        player.physicsBody?.collisionBitMask = groundCategory
+        player.texture = SKTexture(imageNamed: "walking000")
         addChild(player)
     }
     
@@ -118,46 +183,64 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
     
     private func setupGround() {
         let ground = SKSpriteNode()
-        ground.physicsBody = SKPhysicsBody(edgeFrom: CGPoint(x: 0, y: 10), to: CGPoint(x: size.width, y: 10))
+        ground.physicsBody = SKPhysicsBody(
+            edgeFrom: CGPoint(x: -5000, y: 10),
+            to: CGPoint(x: 5000, y: 10)
+        )
         ground.physicsBody?.isDynamic = false
+        
+        //Define the floor physics values
+        ground.physicsBody?.categoryBitMask = groundCategory
+        ground.physicsBody?.collisionBitMask = playerCategory
         addChild(ground)
     }
     
     private func runAnimation(){
-        // set up animation
-        let textureAtlas = SKTextureAtlas(named: "Kirby")
         var playerAnimation = [SKTexture]()
-        for i in 0..<textureAtlas.textureNames.count {
-            let name = "tile00\(i)"
-            playerAnimation.append(textureAtlas.textureNamed(name))
+
+        for i in 0...3 {
+            let name = "walking00\(i)"
+            playerAnimation.append(SKTexture(imageNamed: name))
         }
         
+        // Clear any previous animations to prevent overlaps
+        player.removeAllActions()
+        
         let animation = SKAction.animate(with: playerAnimation, timePerFrame: 0.15)
-        let repeatForever = SKAction.repeatForever(animation)
-        player.run(repeatForever)
+        
+        player.run(SKAction.repeatForever(animation), withKey: "walking")
     }
 
     private func jumpAnimation() {
-        let textureAtlas = SKTextureAtlas(named: "Jumping")
         var playerAnimation = [SKTexture]()
-        for i in 0..<textureAtlas.textureNames.count {
-            let name = "jump00\(i)"
-            playerAnimation.append(textureAtlas.textureNamed(name))
+       
+        for i in 0...4 {
+            let name = "jumping00\(i)"
+            playerAnimation.append(SKTexture(imageNamed: name))
         }
+        guard !playerAnimation.isEmpty else {
+               print("NO JUMP TEXTURES")
+               return
+        }
+        
+        player.removeAllActions()
+        
         let animation = SKAction.animate(with: playerAnimation, timePerFrame: 0.15)
         let repeatForever = SKAction.repeatForever(animation)
-        player.run(repeatForever)
+        player.run(repeatForever, withKey: "jumping")
     }
     
     private func spawnEnemy() {
-        let enemy = SKSpriteNode(imageNamed: "King DEDEDE")
+        let enemy = SKSpriteNode(imageNamed: "KingDedede")
         enemy.position = CGPoint(x: size.width + enemy.size.width, y: 11)
-        enemy.setScale(2)
+        enemy.xScale = -2
+        enemy.yScale = 2
         enemy.zPosition = 4
         enemy.physicsBody = SKPhysicsBody(rectangleOf: enemy.size)
         enemy.physicsBody?.isDynamic = true
         enemy.physicsBody?.allowsRotation = false
         enemy.physicsBody?.affectedByGravity = false
+        
         let move = SKAction.moveTo(x: -enemy.size.width, duration: 5)
         let remove = SKAction.removeFromParent()
         let sequence = SKAction.sequence([move, remove])
@@ -165,11 +248,10 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         
         addChild(enemy)
         
-        let textureAtlas = SKTextureAtlas(named: "King DEDEDE")
         var enemyAnimation = [SKTexture]()
-        for i in 0..<textureAtlas.textureNames.count {
-            let name = "tile00\(i)"
-            enemyAnimation.append(textureAtlas.textureNamed(name))
+        for i in 0...3{
+            let name = "enemyWalk00\(i)"
+            enemyAnimation.append(SKTexture(imageNamed: name))
         }
         let animation = SKAction.animate(with: enemyAnimation, timePerFrame: 0.15)
         

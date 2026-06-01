@@ -8,11 +8,24 @@
 import SwiftUI
 import SpriteKit
 struct ContentView: View {
+    @State private var movement = CGSize.zero
     private let gameScene = GameScene()
     var body: some View {
-        VStack {
+        ZStack {
             SpriteView(scene: gameScene)
                 .ignoresSafeArea()
+            
+            VStack{
+                Spacer()
+                HStack{
+                    Joystick(movement: $movement)
+                    Spacer()
+                }
+                .padding()
+            }
+        }
+        .onChange(of: movement){_, newValue in
+            gameScene.movePlayer(newValue)
         }
         
     }
