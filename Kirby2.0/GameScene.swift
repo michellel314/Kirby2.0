@@ -122,8 +122,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         player.position = CGPoint(x: 200, y: 100) // Spawns cleanly above the floor line
         player.setScale(0.5)
         player.zPosition = 4
-        
-        player.physicsBody = SKPhysicsBody(rectangleOf: player.size)
+        let interactiveRect = CGSize(width: player.size.width / 2, height: player.size.height)
+        player.physicsBody = SKPhysicsBody(rectangleOf: interactiveRect)
         player.physicsBody?.isDynamic = true
         player.physicsBody?.allowsRotation = false
         
@@ -236,7 +236,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         enemy.xScale = -2
         enemy.yScale = 2
         enemy.zPosition = 4
-        enemy.physicsBody = SKPhysicsBody(rectangleOf: enemy.size)
+        let interactiveRect = CGSize(width: enemy.size.width / 2, height: enemy.size.height)
+        enemy.physicsBody = SKPhysicsBody(rectangleOf: interactiveRect)
         enemy.physicsBody?.isDynamic = true
         enemy.physicsBody?.allowsRotation = false
         enemy.physicsBody?.affectedByGravity = false
