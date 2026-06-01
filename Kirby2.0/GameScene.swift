@@ -15,6 +15,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
     private var isJumping = false
     private var jumpCount = 0
     private var isMoving = false
+    private var canMove = true
     
     private let playerCategory: UInt32 = 0x1 << 0
     private let groundCategory: UInt32 = 0x1 << 1
@@ -64,7 +65,11 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         //If the player and the ground have officially collided
         if collision == (playerCategory | groundCategory){
             jumpCount = 0 // Reset jumps  back to 0 on landing
-            runAnimation() // Kirby has landed safely so resume the walking
+            player.removeAction(forKey: "jumping")
+            player.removeAction(forKey: "walking")
+            player.texture = SKTexture(imageNamed: "walking000")
+            isMoving = false
+            canMove = false
         }
     }
     
@@ -72,18 +77,23 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
     func movePlayer(_ input: CGSize){
         let deadzone: CGFloat = 5
 
-        if abs(input.width) < deadzone {
-
-            isMoving = false
-
-            player.removeAction(forKey:"walking")
-
-            player.texture =
-                SKTexture(imageNamed:"walking000")
-
+        // If movement is locked, wait until joystick returns to center
+        if !canMove {
+            if abs(input.width) < deadzone {
+               canMove = true
+                
+            }
             return
         }
-
+        
+        if abs(input.width) < deadzone {
+            isMoving = false
+            player.removeAction(forKey:"walking")
+            player.texture =
+                SKTexture(imageNamed:"walking000")
+            return
+        }
+        
         isMoving = true
 
         let speed: CGFloat = 0.08
@@ -104,6 +114,20 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
 
             runAnimation()
         }
+    }
+    
+    func jump() {
+
+        guard jumpCount < 2 else { return }
+
+        jumpCount += 1
+        isJumping = true
+
+        player.removeAction(forKey: "walking")
+        jumpAnimation()
+
+        player.physicsBody?.velocity.dy = 0
+        player.physicsBody?.applyImpulse(CGVector(dx: 0, dy: 300))
     }
     
     private func setupScene(){
@@ -196,22 +220,39 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
     }
     
     private func runAnimation(){
-        var playerAnimation = [SKTexture]()
-
-        for i in 0...3 {
-            let name = "walking00\(i)"
-            playerAnimation.append(SKTexture(imageNamed: name))
+        
+        // First play 000 -> 003 once
+        var startFrames = [SKTexture]()
+        for i in 0...3{
+            startFrames.append(
+                SKTexture(imageNamed: "walking00\(i)")
+            )
         }
         
-        // Clear any previous animations to prevent overlaps
-        player.removeAllActions()
+        // Then loop only 001 --> 003
+        var loopFrames = [SKTexture]()
+        for i in 1...3{
+            loopFrames.append(
+                SKTexture(imageNamed: "walking00\(i)")
+            )
+        }
         
-        let animation = SKAction.animate(with: playerAnimation, timePerFrame: 0.15)
+        let startAnimation = SKAction.animate(with: startFrames, timePerFrame: 0.15)
         
-        player.run(SKAction.repeatForever(animation), withKey: "walking")
+        let loopAnimation = SKAction.repeatForever(SKAction.animate(with: loopFrames, timePerFrame: 0.15))
+        
+        player.removeAction(forKey: "walking")
+       
+        let sequence = SKAction.sequence([startAnimation, loopAnimation])
+        
+        player.run(sequence, withKey: "walking")
     }
+    
+    
 
     private func jumpAnimation() {
+        player.removeAction(forKey: "walking")
+        
         var playerAnimation = [SKTexture]()
        
         for i in 0...4 {
@@ -223,8 +264,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
                return
         }
         
-        player.removeAllActions()
-        
+     
         let animation = SKAction.animate(with: playerAnimation, timePerFrame: 0.15)
         let repeatForever = SKAction.repeatForever(animation)
         player.run(repeatForever, withKey: "jumping")

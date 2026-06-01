@@ -20,6 +20,9 @@ struct ContentView: View {
                 HStack{
                     Joystick(movement: $movement)
                     Spacer()
+                    JumpButton{
+                        gameScene.jump()
+                    }
                 }
                 .padding()
             }
