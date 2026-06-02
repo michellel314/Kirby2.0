@@ -16,81 +16,159 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
     private var jumpCount = 0
     private var isMoving = false
     private var canMove = true
-    
+    private var isOnGround = true // Tracks if Kirby is physically on surface
     private let playerCategory: UInt32 = 0x1 << 0
     private let groundCategory: UInt32 = 0x1 << 1
+    
+    
+    // --- New Stats & HUD ---
+    private var kirbyHealth = 100
+    private var kirbyAttack = 10
+    private var hudLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
+
+    // --- New Physics Categories ---
+    private let platformCategory: UInt32 = 0x1 << 2
+    private let dededeCategory: UInt32   = 0x1 << 3
+    private let trashCategory: UInt32    = 0x1 << 4
+    private let starCategory: UInt32     = 0x1 << 5
+    
+    // Tracks the live joystick state 60 times a second
+    var joystickInput: CGSize = .zero
     override func didMove(to view: SKView){
         setupScene()
         setupPlayer()
         setupGround()
-        //spawnEnemy()
-        setupBackground(imageName: "Dreamscape", duration: 10, zPos: 1, scale: 1)
+   
+        setupHUD()
+        setupPlatforms()
+        spawnEnemy(at: CGPoint(x: 400, y: 162)) // Sits perfectly on platform 1
+        spawnEnemy(at: CGPoint(x: 750, y: 272)) // Sits perfectly on platform 2
+        setupBackground(imageName: "Dreamscape", duration: 5, zPos: 1, scale: 1)
         
     }
     
-    override func update(_ currentTime: TimeInterval){
+    override func update(_ currentTime: TimeInterval) {
+        // 1. Keep your live joystick movement running
+        movePlayer(joystickInput)
+        
+        // 2. Ask the physics engine exactly what Kirby is touching right now
+        let contactedBodies = player.physicsBody?.allContactedBodies() ?? []
+        let isTouchingSurface = contactedBodies.contains { body in
+            body.categoryBitMask == groundCategory || body.categoryBitMask == platformCategory
+        }
+        
+        // 3. Automatically adjust states based on real-time contact arrays
+        if isTouchingSurface {
+            // If we just landed from the air
+            if !isOnGround {
+                isOnGround = true
+                jumpCount = 0 // Safely reset jumps
+                player.removeAction(forKey: "jumping")
+                
+                if isMoving {
+                    if player.action(forKey: "walking") == nil { runAnimation() }
+                } else {
+                    player.texture = SKTexture(imageNamed: "walking000")
+                }
+            }
+        } else {
+            // Kirby has zero contact with floors/ledges (He jumped or fell off a ledge)
+            if isOnGround {
+                isOnGround = false
+                player.removeAction(forKey: "walking")
+                jumpAnimation() // Lock cleanly into jump/fall frames
+            }
+        }
+    }
+    
+ //   override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?){
+ //       isJumping = false
+        // Removed runAnimation() from here so Kirby stays in his jump animation while mid-air
+ //   }
+    
+    //SKPhysicsContactDelegate delegate method
+    func didBegin(_ contact: SKPhysicsContact) {
+        let collision = contact.bodyA.categoryBitMask | contact.bodyB.categoryBitMask
+        let targetNode = (contact.bodyA.categoryBitMask == playerCategory) ? contact.bodyB.node : contact.bodyA.node
+        
+        // 1. Kirby lands on Ground OR Platforms
+        if collision == (playerCategory | groundCategory) || collision == (playerCategory | platformCategory) {
+            jumpCount = 0
+            isOnGround = true
+            player.removeAction(forKey: "jumping")
+            if isMoving {
+                if player.action(forKey: "walking") == nil { runAnimation() }
+            } else {
+                player.texture = SKTexture(imageNamed: "walking000")
+            }
+        }
+        
+        // 2. Kirby encounters King Dedede
+        if collision == (playerCategory | dededeCategory) {
+            guard let enemy = targetNode as? SKSpriteNode else { return }
+            
+            // If falling downwards, it's a STOMP!
+            if let velocity = player.physicsBody?.velocity, velocity.dy < -20 {
+                let enemyPosition = enemy.position
+                enemy.removeFromParent()
+                
+                player.physicsBody?.velocity = CGVector(dx: player.physicsBody?.velocity.dx ?? 0, dy: 300) // Bounce
+                dropGoldenTrash(at: enemyPosition) // Spawn the container
+            } else {
+                kirbyHealth -= 15 // Side hit -> take damage
+                updateHUD()
+            }
+        }
+        
+        // 3. Kirby opens The Golden Trash
+        if collision == (playerCategory | trashCategory) {
+            guard let trash = targetNode else { return }
+            let trashPos = trash.position
+            trash.removeFromParent()
+            
+            if Double.random(in: 0...1) < 0.3 {
+                kirbyHealth -= 20 // 30% Explodes!
+                triggerExplosionEffect(at: trashPos)
+            } else {
+                dropGoldenStar(at: trashPos) // 70% Drops star
+            }
+            updateHUD()
+        }
+        
+        // 4. Kirby collects a Golden Star (BUFFS)
+        if collision == (playerCategory | starCategory) {
+            targetNode?.removeFromParent()
+            
+            if Bool.random() {
+                kirbyAttack += 3 // Upgrade attack
+            } else {
+                kirbyHealth += 25 // Over-heal completely past 100 HP cap!
+            }
+            updateHUD()
+        }
+    }
 
-        
-        if player.position.y > size.height / 2 {
-            isJumping = false
-        }
-        
-        if isJumping {
-            player.physicsBody?.velocity = CGVector(dx: 0, dy: 300)
-        }
-    }
-    
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?){
-        if jumpCount < 2 {
-            if player.physicsBody?.velocity.dy == 0 {
-                isJumping = true
-                jumpCount += 1
+    func didEnd(_ contact: SKPhysicsContact) {
+        let collision = contact.bodyA.categoryBitMask | contact.bodyB.categoryBitMask
+        if collision == (playerCategory | groundCategory) || collision == (playerCategory | platformCategory) {
+            if isOnGround {
+                isOnGround = false
+                player.removeAction(forKey: "walking")
                 jumpAnimation()
             }
         }
-        
-    
     }
-    
-    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?){
-        isJumping = false
-        // Removed runAnimation() from here so Kirby stays in his jump animation while mid-air
-    }
-    
-    //SKPhysicsContactDelegate delegate method
-    func didBegin(_ contact: SKPhysicsContact){
-        //Combine the two contacting bodies into a mask
-        let collision = contact.bodyA.categoryBitMask | contact.bodyB.categoryBitMask
-        
-        //If the player and the ground have officially collided
-        if collision == (playerCategory | groundCategory){
-            jumpCount = 0 // Reset jumps  back to 0 on landing
-            player.removeAction(forKey: "jumping")
-            player.removeAction(forKey: "walking")
-            player.texture = SKTexture(imageNamed: "walking000")
-            isMoving = false
-            canMove = false
-        }
-    }
-    
     
     func movePlayer(_ input: CGSize){
         let deadzone: CGFloat = 5
-
-        // If movement is locked, wait until joystick returns to center
-        if !canMove {
-            if abs(input.width) < deadzone {
-               canMove = true
-                
-            }
-            return
-        }
         
         if abs(input.width) < deadzone {
             isMoving = false
             player.removeAction(forKey:"walking")
-            player.texture =
-                SKTexture(imageNamed:"walking000")
+            //Only show flat idle frame if we aren't mid-air
+            if isOnGround {
+                player.texture = SKTexture(imageNamed:"walking000")
+            }
             return
         }
         
@@ -99,35 +177,74 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         let speed: CGFloat = 0.08
 
         player.position.x += input.width * speed
-        player.position.x = max(0, min(player.position.x, size.width))
+        player.position.x = max(player.size.width / 2, min(player.position.x, size.width - player.size.width / 2))
 
+        // Flip Kirby left/right depending on joystick direction
         if input.width > 0 {
-
             player.xScale = abs(player.xScale)
-
         } else {
-
             player.xScale = -abs(player.xScale)
         }
 
-        if player.action(forKey:"walking") == nil {
-
+        // Only loop the walking animation if Kirby is actually on solid ground
+        if isOnGround && player.action(forKey:"walking") == nil {
             runAnimation()
         }
     }
     
     func jump() {
-
-        guard jumpCount < 2 else { return }
+        // Enforce a strict max cap of 2 jumps
+        guard jumpCount < 3 else { return }
 
         jumpCount += 1
-        isJumping = true
-
+        isOnGround = false // Kirby is now AIRBORNE!
+        
+        // Stop any running animations to clear the frame buffer
         player.removeAction(forKey: "walking")
+        player.removeAction(forKey: "jumping")
         jumpAnimation()
-
-        player.physicsBody?.velocity.dy = 0
-        player.physicsBody?.applyImpulse(CGVector(dx: 0, dy: 300))
+        
+        // Grab current left/right speed so Kirby can still move sideways while jumping
+            let currentXVelocity = player.physicsBody?.velocity.dx ?? 0
+            player.physicsBody?.velocity = CGVector(dx: currentXVelocity, dy: 350)
+    }
+    
+    func spawnEnemy(at position: CGPoint) {
+        let enemy = SKSpriteNode(imageNamed: "KingDedede")
+        enemy.position = position
+        enemy.xScale = -0.8
+        enemy.yScale = 0.8
+        enemy.zPosition = 4
+        
+        let interactiveRect = CGSize(width: enemy.size.width / 2, height: enemy.size.height)
+        enemy.physicsBody = SKPhysicsBody(rectangleOf: interactiveRect)
+        enemy.physicsBody?.isDynamic = false // Stays perfectly on his platform
+        enemy.physicsBody?.allowsRotation = false
+        
+        enemy.physicsBody?.categoryBitMask = dededeCategory
+        enemy.physicsBody?.contactTestBitMask = playerCategory
+        addChild(enemy)
+        
+        // --- MARIO-STYLE AUTOMATIC PATROL LOGIC ---
+        let patrolDistance: CGFloat = 130  // Distance to travel left/right from center
+        let walkSpeed: TimeInterval = 2.5   // Time it takes to walk one direction
+            
+        let moveLeft  = SKAction.moveBy(x: -patrolDistance, y: 0, duration: walkSpeed)
+        let flipRight = SKAction.run { enemy.xScale = 0.8 }  // Look Right
+        let moveRight = SKAction.moveBy(x: patrolDistance * 2, y: 0, duration: walkSpeed * 2)
+        let flipLeft  = SKAction.run { enemy.xScale = -0.8 } // Look Left
+        let moveBack  = SKAction.moveBy(x: -patrolDistance, y: 0, duration: walkSpeed)
+            
+        // Stitch it together into a looping routine
+        let patrolSequence = SKAction.sequence([moveLeft, flipRight, moveRight, flipLeft, moveBack])
+        enemy.run(SKAction.repeatForever(patrolSequence))
+        
+        // --- Keep his texture walking animation running concurrently ---
+        var enemyAnimation = [SKTexture]()
+        for i in 0...3 { enemyAnimation.append(SKTexture(imageNamed: "enemyWalk00\(i)")) }
+        if !enemyAnimation.isEmpty {
+            enemy.run(SKAction.repeatForever(SKAction.animate(with: enemyAnimation, timePerFrame: 0.15)))
+        }
     }
     
     private func setupScene(){
@@ -144,7 +261,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
     private func setupPlayer(){
 
         player.position = CGPoint(x: 200, y: 100) // Spawns cleanly above the floor line
-        player.setScale(0.5)
+        player.setScale(0.7)
         player.zPosition = 4
         let interactiveRect = CGSize(width: player.size.width / 2, height: player.size.height)
         player.physicsBody = SKPhysicsBody(rectangleOf: interactiveRect)
@@ -154,7 +271,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         //Tell the physics world that this body belongs to the "player"
         player.physicsBody?.categoryBitMask = playerCategory
         //Tell the physics world to alert "didBegin" when touching the ground
-        player.physicsBody?.contactTestBitMask = groundCategory
+        player.physicsBody?.contactTestBitMask = groundCategory | platformCategory | dededeCategory | trashCategory | starCategory
         player.physicsBody?.collisionBitMask = groundCategory
         player.texture = SKTexture(imageNamed: "walking000")
         addChild(player)
@@ -176,8 +293,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
             layer.anchorPoint = .zero
             layer.zPosition = zPos
             
-            //animate layer so it moves off the screen
-            let move = SKAction.moveBy(x: -layer.size.width, y: 0, duration: 10)
+            // Uses the actual 'duration' variable passed into the function
+            let move = SKAction.moveBy(x: -layer.size.width, y: 0, duration: duration)
             let wrap = SKAction.moveBy(x: layer.size.width, y: 0, duration: 0)
             let sequence = SKAction.sequence([move, wrap])
             let moveForever = SKAction.repeatForever(sequence)
@@ -200,7 +317,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         let howManyPartiallyFit = Int(size.width / layerSize.width)
         
         // we need 1 more than how many partially fit
-        let howManyNeeded = howManyPartiallyFit + 1
+        let howManyNeeded = howManyPartiallyFit + 2
         return howManyNeeded
         
     }
@@ -255,7 +372,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         
         var playerAnimation = [SKTexture]()
        
-        for i in 0...4 {
+        for i in 0...2 {
             let name = "jumping00\(i)"
             playerAnimation.append(SKTexture(imageNamed: name))
         }
@@ -270,36 +387,71 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         player.run(repeatForever, withKey: "jumping")
     }
     
-    private func spawnEnemy() {
-        let enemy = SKSpriteNode(imageNamed: "KingDedede")
-        enemy.position = CGPoint(x: size.width + enemy.size.width, y: 11)
-        enemy.xScale = -2
-        enemy.yScale = 2
-        enemy.zPosition = 4
-        let interactiveRect = CGSize(width: enemy.size.width / 2, height: enemy.size.height)
-        enemy.physicsBody = SKPhysicsBody(rectangleOf: interactiveRect)
-        enemy.physicsBody?.isDynamic = true
-        enemy.physicsBody?.allowsRotation = false
-        enemy.physicsBody?.affectedByGravity = false
-        
-        let move = SKAction.moveTo(x: -enemy.size.width, duration: 5)
-        let remove = SKAction.removeFromParent()
-        let sequence = SKAction.sequence([move, remove])
-        enemy.run(sequence)
-        
-        addChild(enemy)
-        
-        var enemyAnimation = [SKTexture]()
-        for i in 0...3{
-            let name = "enemyWalk00\(i)"
-            enemyAnimation.append(SKTexture(imageNamed: name))
-        }
-        let animation = SKAction.animate(with: enemyAnimation, timePerFrame: 0.15)
-        
-        let repeatForever = SKAction.repeatForever(animation)
-        enemy.run(repeatForever)
-    }
-
+    
 
     
+    private func setupHUD() {
+        hudLabel.text = "HP: \(kirbyHealth)  |  ATK: \(kirbyAttack)"
+        hudLabel.fontSize = 18
+        hudLabel.fontColor = .white
+        hudLabel.position = CGPoint(x: 150, y: size.height - 40)
+        hudLabel.zPosition = 10
+        addChild(hudLabel)
+    }
+
+    private func updateHUD() {
+        hudLabel.text = "HP: \(kirbyHealth)  |  ATK: \(kirbyAttack)"
+    }
+
+    private func setupPlatforms() {
+        // Stretched platform widths out to 350
+        createLedge(at: CGPoint(x: 400, y: 120), size: CGSize(width: 350, height: 20))
+        createLedge(at: CGPoint(x: 750, y: 230), size: CGSize(width: 350, height: 20))
+    }
+
+    private func createLedge(at pos: CGPoint, size: CGSize) {
+        let ledge = SKSpriteNode(color: UIColor.systemPink.withAlphaComponent(0.6), size: size)
+        ledge.position = pos
+        ledge.zPosition = 3
+        ledge.physicsBody = SKPhysicsBody(rectangleOf: size)
+        ledge.physicsBody?.isDynamic = false
+        ledge.physicsBody?.categoryBitMask = platformCategory
+        ledge.physicsBody?.collisionBitMask = playerCategory
+        addChild(ledge)
+    }
+
+    private func dropGoldenTrash(at pos: CGPoint) {
+        let trash = SKSpriteNode(color: .yellow, size: CGSize(width: 35, height: 35))
+        trash.position = pos
+        trash.zPosition = 4
+        trash.physicsBody = SKPhysicsBody(rectangleOf: trash.size)
+        trash.physicsBody?.isDynamic = false
+        trash.physicsBody?.categoryBitMask = trashCategory
+        trash.physicsBody?.contactTestBitMask = playerCategory
+        addChild(trash)
+    }
+
+    private func dropGoldenStar(at pos: CGPoint) {
+        let star = SKSpriteNode(color: .cyan, size: CGSize(width: 25, height: 25))
+        star.position = pos
+        star.zPosition = 4
+        star.physicsBody = SKPhysicsBody(rectangleOf: star.size)
+        star.physicsBody?.isDynamic = false
+        star.physicsBody?.categoryBitMask = starCategory
+        star.physicsBody?.contactTestBitMask = playerCategory
+        
+        let floatUp = SKAction.moveBy(x: 0, y: 8, duration: 0.5)
+        star.run(SKAction.repeatForever(SKAction.sequence([floatUp, floatUp.reversed()])))
+        addChild(star)
+    }
+
+    private func triggerExplosionEffect(at pos: CGPoint) {
+        let explosion = SKShapeNode(circleOfRadius: 30)
+        explosion.position = pos
+        explosion.fillColor = .orange
+        explosion.strokeColor = .yellow
+        explosion.zPosition = 5
+        addChild(explosion)
+        explosion.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.2), SKAction.removeFromParent()]))
+    }
 }

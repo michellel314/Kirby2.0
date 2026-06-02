@@ -27,8 +27,9 @@ struct ContentView: View {
                 .padding()
             }
         }
-        .onChange(of: movement){_, newValue in
-            gameScene.movePlayer(newValue)
+        .onChange(of: movement) { _, newValue in
+            // Pass the raw data directly to the scene variable instead of triggering a single function
+            gameScene.joystickInput = newValue
         }
         
     }
