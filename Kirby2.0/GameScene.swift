@@ -34,6 +34,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
     
     // Tracks the live joystick state 60 times a second
     var joystickInput: CGSize = .zero
+    
     override func didMove(to view: SKView){
         setupScene()
         setupPlayer()
@@ -165,6 +166,10 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         if abs(input.width) < deadzone {
             isMoving = false
             player.removeAction(forKey:"walking")
+            
+            //Stop horizontal movement safely without changing gravity speed
+            player.physicsBody?.velocity.dx = 0
+            
             //Only show flat idle frame if we aren't mid-air
             if isOnGround {
                 player.texture = SKTexture(imageNamed:"walking000")
@@ -173,9 +178,13 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         }
         
         isMoving = true
-
+        
+        // Move via physics velocity instead of altering position.x directly
+        let moveSpeed: CGFloat = 5.0
+        player.physicsBody?.velocity.dx = input.width * moveSpeed
+        
         let speed: CGFloat = 0.08
-
+        
         player.position.x += input.width * speed
         player.position.x = max(player.size.width / 2, min(player.position.x, size.width - player.size.width / 2))
 
@@ -194,7 +203,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
     
     func jump() {
         // Enforce a strict max cap of 2 jumps
-        guard jumpCount < 3 else { return }
+        guard jumpCount < 10 else { return }
 
         jumpCount += 1
         isOnGround = false // Kirby is now AIRBORNE!
@@ -264,15 +273,16 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         player.setScale(0.7)
         player.zPosition = 4
         let interactiveRect = CGSize(width: player.size.width / 2, height: player.size.height)
-        player.physicsBody = SKPhysicsBody(rectangleOf: interactiveRect)
+        player.physicsBody = SKPhysicsBody(rectangleOf: player.size)
         player.physicsBody?.isDynamic = true
-        player.physicsBody?.allowsRotation = false
+        player.physicsBody?.affectedByGravity = true
+        player.physicsBody?.allowsRotation = false // Prevents kirby from rolling
         
         //Tell the physics world that this body belongs to the "player"
         player.physicsBody?.categoryBitMask = playerCategory
         //Tell the physics world to alert "didBegin" when touching the ground
         player.physicsBody?.contactTestBitMask = groundCategory | platformCategory | dededeCategory | trashCategory | starCategory
-        player.physicsBody?.collisionBitMask = groundCategory
+        player.physicsBody?.collisionBitMask = groundCategory | platformCategory | dededeCategory
         player.texture = SKTexture(imageNamed: "walking000")
         addChild(player)
     }
@@ -403,10 +413,28 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         hudLabel.text = "HP: \(kirbyHealth)  |  ATK: \(kirbyAttack)"
     }
 
-    private func setupPlatforms() {
+    func setupPlatforms() {
+        // Platform 1 (Under Enemy 1)
+        let platform1 = SKSpriteNode(color: .brown, size: CGSize(width: 250, height: 20))
+        platform1.position = CGPoint(x: 400, y: 120) // Positioned safely under the enemy at 162
+        platform1.zPosition = 2
+        platform1.physicsBody = SKPhysicsBody(rectangleOf: platform1.size)
+        platform1.physicsBody?.isDynamic = false // Stops it from falling down
+        platform1.physicsBody?.categoryBitMask = platformCategory
+        addChild(platform1)
+            
+        // Platform 2 (Under Enemy 2)
+        let platform2 = SKSpriteNode(color: .brown, size: CGSize(width: 250, height: 20))
+        platform2.position = CGPoint(x: 750, y: 230) // Positioned safely under the enemy at 272
+        platform2.zPosition = 2
+        platform2.physicsBody = SKPhysicsBody(rectangleOf: platform2.size)
+        platform2.physicsBody?.isDynamic = false
+        platform2.physicsBody?.categoryBitMask = platformCategory
+        addChild(platform2)
+        
         // Stretched platform widths out to 350
-        createLedge(at: CGPoint(x: 400, y: 120), size: CGSize(width: 350, height: 20))
-        createLedge(at: CGPoint(x: 750, y: 230), size: CGSize(width: 350, height: 20))
+       // createLedge(at: CGPoint(x: 400, y: 120), size: CGSize(width: 350, height: 20))
+      //  createLedge(at: CGPoint(x: 750, y: 230), size: CGSize(width: 350, height: 20))
     }
 
     private func createLedge(at pos: CGPoint, size: CGSize) {
