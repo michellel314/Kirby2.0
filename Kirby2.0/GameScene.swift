@@ -8,9 +8,9 @@
 import Foundation
 import SwiftUI
 import SpriteKit
+import Combine
 
-
-class GameScene: SKScene, SKPhysicsContactDelegate{
+class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
     private var player = SKSpriteNode(imageNamed: "tile000")
     private var isJumping = false
     private var jumpCount = 0
@@ -23,6 +23,10 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
     
     // --- New Stats & HUD ---
     private var kirbyHealth = 100
+    @Published var showEatButton = false
+    private var nearbyTrash: SKSpriteNode? // Tracks the specific trash Kirby is next to
+    let objectWillChange = ObservableObjectPublisher()
+    
     private var kirbyAttack = 10
     private var hudLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
 
@@ -90,9 +94,21 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
     //SKPhysicsContactDelegate delegate method
     func didBegin(_ contact: SKPhysicsContact) {
         let collision = contact.bodyA.categoryBitMask | contact.bodyB.categoryBitMask
+        
+        // 1. Proximity Detection: Kirby approaches Golden Trash
+        if collision == (playerCategory | trashCategory) {
+            let targetNode = (contact.bodyA.categoryBitMask == trashCategory) ? contact.bodyA.node : contact.bodyB.node
+            if let trashNode = targetNode as? SKSpriteNode {
+                nearbyTrash = trashNode
+                DispatchQueue.main.async {
+                        self.showEatButton = true // Signals SwiftUI to reveal the button!
+                }
+            }
+        }
+        
         let targetNode = (contact.bodyA.categoryBitMask == playerCategory) ? contact.bodyB.node : contact.bodyA.node
         
-        // 1. Kirby lands on Ground OR Platforms
+        // 2. Solid Landings: Kirby hits Ground OR Platforms
         if collision == (playerCategory | groundCategory) || collision == (playerCategory | platformCategory) {
             jumpCount = 0
             isOnGround = true
@@ -104,46 +120,51 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
             }
         }
         
-        // 2. Kirby encounters King Dedede
+        // 3. Combat Tracking: Kirby encounters King Dedede
         if collision == (playerCategory | dededeCategory) {
             guard let enemy = targetNode as? SKSpriteNode else { return }
             
-            // If falling downwards, it's a STOMP!
-            if let velocity = player.physicsBody?.velocity, velocity.dy < -20 {
-                let enemyPosition = enemy.position
-                enemy.removeFromParent()
-                
-                player.physicsBody?.velocity = CGVector(dx: player.physicsBody?.velocity.dx ?? 0, dy: 300) // Bounce
-                dropGoldenTrash(at: enemyPosition) // Spawn the container
-            } else {
-                kirbyHealth -= 15 // Side hit -> take damage
-                updateHUD()
-            }
-        }
-        
-        // 3. Kirby opens The Golden Trash
-        if collision == (playerCategory | trashCategory) {
-            guard let trash = targetNode else { return }
-            let trashPos = trash.position
-            trash.removeFromParent()
+            let isFalling = (player.physicsBody?.velocity.dy ?? 0) < -20
+            let isAboveEnemy = player.position.y > (enemy.position.y + 15)
             
-            if Double.random(in: 0...1) < 0.3 {
-                kirbyHealth -= 20 // 30% Explodes!
-                triggerExplosionEffect(at: trashPos)
+            if isFalling && isAboveEnemy {
+                if let currentHP = enemy.userData?.value(forKey: "hp") as? Int {
+                    let newHP = currentHP - kirbyAttack
+                    
+                    if newHP <= 0 {
+                        let enemyPosition = enemy.position
+                        enemy.removeFromParent()
+                        dropGoldenTrash(at: enemyPosition)
+                    } else {
+                        enemy.userData?.setValue(newHP, forKey: "hp")
+                        
+                        let flashRed = SKAction.sequence([
+                            SKAction.fadeAlpha(to: 0.3, duration: 0.1),
+                            SKAction.fadeAlpha(to: 1.0, duration: 0.1)
+                        ])
+                        enemy.run(flashRed)
+                    }
+                }
+                player.physicsBody?.velocity = CGVector(dx: player.physicsBody?.velocity.dx ?? 0, dy: 320)
             } else {
-                dropGoldenStar(at: trashPos) // 70% Drops star
+                let isOnSameLevel = abs(player.position.y - enemy.position.y) < 40
+                if isOnSameLevel {
+                    kirbyHealth -= 15
+                    updateHUD()
+                }
             }
-            updateHUD()
         }
         
-        // 4. Kirby collects a Golden Star (BUFFS)
+        // NOTE: Old conflicting automatic trash opening logic has been completely removed from here!
+        
+        // 4. Buff Collection: Kirby absorbs a Golden Star
         if collision == (playerCategory | starCategory) {
             targetNode?.removeFromParent()
             
             if Bool.random() {
-                kirbyAttack += 3 // Upgrade attack
+                kirbyAttack += 3
             } else {
-                kirbyHealth += 25 // Over-heal completely past 100 HP cap!
+                kirbyHealth += 25
             }
             updateHUD()
         }
@@ -156,6 +177,12 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
                 isOnGround = false
                 player.removeAction(forKey: "walking")
                 jumpAnimation()
+            }
+        }
+        if collision == (playerCategory | trashCategory) {
+            nearbyTrash = nil
+            DispatchQueue.main.async {
+                self.showEatButton = false
             }
         }
     }
@@ -183,11 +210,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         let moveSpeed: CGFloat = 5.0
         player.physicsBody?.velocity.dx = input.width * moveSpeed
         
-        let speed: CGFloat = 0.08
-        
-        player.position.x += input.width * speed
         player.position.x = max(player.size.width / 2, min(player.position.x, size.width - player.size.width / 2))
-
         // Flip Kirby left/right depending on joystick direction
         if input.width > 0 {
             player.xScale = abs(player.xScale)
@@ -220,6 +243,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
     
     func spawnEnemy(at position: CGPoint) {
         let enemy = SKSpriteNode(imageNamed: "KingDedede")
+        enemy.userData = NSMutableDictionary()
+        enemy.userData?.setValue(30, forKey: "hp") // Takes 3 stomps to destroy (30 hp in total)
         enemy.position = position
         enemy.xScale = -0.8
         enemy.yScale = 0.8
@@ -256,6 +281,60 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         }
     }
     
+    func eatTrash() {
+        guard let trash = nearbyTrash else { return }
+    //    let trashPos = trash.position
+        
+        // 1. Clean up nodes instantly so the player can't double-tap
+        trash.removeFromParent()
+        nearbyTrash = nil
+        DispatchQueue.main.async {
+            self.showEatButton = false
+        }
+        
+        // 2. Temporarily stop Kirby from moving while eating
+        let originalMovementState = canMove
+        canMove = false
+        player.physicsBody?.velocity.dx = 0
+        player.removeAction(forKey: "walking")
+        player.removeAction(forKey: "jumping")
+        
+        // 3. Build your animation array matching your asset folder names exactly
+        var eatingFrames = [SKTexture]()
+        for i in 0...4 {
+            eatingFrames.append(SKTexture(imageNamed: "eating00\(i)"))
+        }
+        
+        // 4. Run the eating frame actions
+        let eatingAnimation = SKAction.animate(with: eatingFrames, timePerFrame: 0.08)
+        player.run(eatingAnimation) { [weak self] in
+            guard let self = self else { return }
+            self.canMove = originalMovementState
+            if self.isOnGround {
+                self.player.texture = SKTexture(imageNamed: "walking000") // Idle frame
+            }
+        }
+        
+        // 5. Probability Roll: 40% Explode (-5 HP), 30% Heal (+10 HP), 30% Attack (+5 ATK)
+        let roll = Double.random(in: 0...100)
+        
+        if roll <= 40.0 {
+            // 40% Chance (0.0 to 40.0)
+            kirbyHealth -= 5
+            // If you have an explosion particle method, call it here:
+            // triggerExplosion(at: trashPos)
+        } else if roll <= 70.0 {
+            // 30% Chance (40.1 to 70.0)
+            kirbyHealth += 10
+        } else {
+            // 30% Chance (70.1 to 100.0)
+            kirbyAttack += 5
+        }
+        
+        // Update your top bar text values
+        updateHUD()
+    }
+    
     private func setupScene(){
         // set the scene background color to black
         backgroundColor = SKColor(.black)
@@ -272,7 +351,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         player.position = CGPoint(x: 200, y: 100) // Spawns cleanly above the floor line
         player.setScale(0.7)
         player.zPosition = 4
-        let interactiveRect = CGSize(width: player.size.width / 2, height: player.size.height)
+     //   let interactiveRect = CGSize(width: player.size.width / 2, height: player.size.height)
         player.physicsBody = SKPhysicsBody(rectangleOf: player.size)
         player.physicsBody?.isDynamic = true
         player.physicsBody?.affectedByGravity = true
@@ -449,7 +528,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
     }
 
     private func dropGoldenTrash(at pos: CGPoint) {
-        let trash = SKSpriteNode(color: .yellow, size: CGSize(width: 35, height: 35))
+        let trash = SKSpriteNode(imageNamed: "goldenTrash")
+        trash.size = CGSize(width: 45, height: 45)
         trash.position = pos
         trash.zPosition = 4
         trash.physicsBody = SKPhysicsBody(rectangleOf: trash.size)
