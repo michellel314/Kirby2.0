@@ -23,7 +23,12 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
     
     // --- New Stats & HUD ---
     private var kirbyHealth = 100
-    @Published var showEatButton = false
+    @Published var showEatButton = false {
+        didSet {
+            // Forces SWIFT UI to evaluate the change instantly
+            objectWillChange.send()
+        }
+    }
     private var nearbyTrash: SKSpriteNode? // Tracks the specific trash Kirby is next to
     let objectWillChange = ObservableObjectPublisher()
     
@@ -86,11 +91,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         }
     }
     
- //   override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?){
- //       isJumping = false
-        // Removed runAnimation() from here so Kirby stays in his jump animation while mid-air
- //   }
-    
     //SKPhysicsContactDelegate delegate method
     func didBegin(_ contact: SKPhysicsContact) {
         let collision = contact.bodyA.categoryBitMask | contact.bodyB.categoryBitMask
@@ -101,8 +101,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
             if let trashNode = targetNode as? SKSpriteNode {
                 nearbyTrash = trashNode
                 DispatchQueue.main.async {
-                        self.showEatButton = true // Signals SwiftUI to reveal the button!
-                }
+                           self.showEatButton = true // Signals SwiftUI to reveal the button!
+                       }
             }
         }
         
@@ -181,13 +181,22 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         }
         if collision == (playerCategory | trashCategory) {
             nearbyTrash = nil
-            DispatchQueue.main.async {
-                self.showEatButton = false
+            DispatchQueue.main.push.async {
+                DispatchQueue.main.async {
+                    self.showEatButton = false
+                }
             }
+        
         }
     }
     
     func movePlayer(_ input: CGSize){
+        
+        guard canMove else {
+            player.physicsBody?.velocity.dx = 0
+            return
+        }
+        
         let deadzone: CGFloat = 5
         
         if abs(input.width) < deadzone {
@@ -288,6 +297,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         // 1. Clean up nodes instantly so the player can't double-tap
         trash.removeFromParent()
         nearbyTrash = nil
+        
         DispatchQueue.main.async {
             self.showEatButton = false
         }
