@@ -6,7 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		3F6365802FD349E300BB28F2 /* GameStateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F63657F2FD349E300BB28F2 /* GameStateManager.swift */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
+		3F63657F2FD349E300BB28F2 /* GameStateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameStateManager.swift; sourceTree = "<group>"; };
 		3FAA88BB2FC0DA1C009EB507 /* Kirby2.0.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Kirby2.0.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -32,6 +37,7 @@
 		3FAA88B22FC0DA1C009EB507 = {
 			isa = PBXGroup;
 			children = (
+				3F63657F2FD349E300BB28F2 /* GameStateManager.swift */,
 				3FAA88BD2FC0DA1C009EB507 /* Kirby2.0 */,
 				3FAA88BC2FC0DA1C009EB507 /* Products */,
 			);
@@ -119,6 +125,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3F6365802FD349E300BB28F2 /* GameStateManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

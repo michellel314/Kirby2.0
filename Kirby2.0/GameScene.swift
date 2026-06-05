@@ -181,12 +181,9 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         }
         if collision == (playerCategory | trashCategory) {
             nearbyTrash = nil
-            DispatchQueue.main.push.async {
-                DispatchQueue.main.async {
-                    self.showEatButton = false
-                }
+            DispatchQueue.main.async { // Fixed: Removed .push
+                self.showEatButton = false
             }
-        
         }
     }
     
