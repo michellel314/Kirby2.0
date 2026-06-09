@@ -26,6 +26,9 @@ struct EatButton: View {
                     }
                 }
                 .transition(.scale.combined(with: .opacity))
+                .onAppear{
+                    print("EAT BUTTON APPEARED")
+                }
             }
         }
         // Creates a smooth pop-in/pop-out bounce animation

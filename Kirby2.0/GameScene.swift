@@ -23,23 +23,28 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
     
     // --- New Stats & HUD ---
     private var kirbyHealth = 100
-    @Published var showEatButton = false {
-        didSet {
-            // Forces SWIFT UI to evaluate the change instantly
-            objectWillChange.send()
-        }
-    }
+    @Published var showEatButton = false
     private var nearbyTrash: SKSpriteNode? // Tracks the specific trash Kirby is next to
-    let objectWillChange = ObservableObjectPublisher()
+    private var isTouchingTrash = false
+
     
     private var kirbyAttack = 10
     private var hudLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
-
+    
+    private var currentZone = 0
+    private var enemiesDefeatedInZone = 0
+    private let enemiesRequiredPerZone = [2, 3, 4, 2, 5]
+    private var cameraNode = SKCameraNode()
+    private var canAdvanceToNextZone = false
+    private var isZoneLocked = true
+    
     // --- New Physics Categories ---
     private let platformCategory: UInt32 = 0x1 << 2
     private let dededeCategory: UInt32   = 0x1 << 3
     private let trashCategory: UInt32    = 0x1 << 4
-    private let starCategory: UInt32     = 0x1 << 5
+   
+    
+    private var zoneBackgrounds: [SKSpriteNode] = []
     
     // Tracks the live joystick state 60 times a second
     var joystickInput: CGSize = .zero
@@ -51,58 +56,96 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
    
         setupHUD()
         setupPlatforms()
-        spawnEnemy(at: CGPoint(x: 400, y: 162)) // Sits perfectly on platform 1
-        spawnEnemy(at: CGPoint(x: 750, y: 272)) // Sits perfectly on platform 2
-        setupBackground(imageName: "Dreamscape", duration: 5, zPos: 1, scale: 1)
+       
+       // setupBackground(imageName: "Dreamscape", duration: 5, zPos: 1, scale: 1)
+        setupZones()
         
+        Enemy(at: CGPoint(x: size.width + 400, y: 180))
+        Enemy(at: CGPoint(x: size.width + 800, y: 250))
+
+        Enemy(at: CGPoint(x: size.width * 2 + 300, y: 150))
+        Enemy(at: CGPoint(x: size.width * 2 + 700, y: 220))
+
+        Enemy(at: CGPoint(x: size.width * 3 + 500, y: 180))
+
+        Enemy(at: CGPoint(x: size.width * 4 + 600, y: 250))
+        
+        camera = cameraNode
+        addChild(cameraNode)
+        
+        cameraNode.position = CGPoint(
+            x: size.width / 2,
+            y: size.height / 2
+        )
+
     }
     
     override func update(_ currentTime: TimeInterval) {
-        // 1. Keep your live joystick movement running
+        super.update(currentTime)
         movePlayer(joystickInput)
-        
-        // 2. Ask the physics engine exactly what Kirby is touching right now
-        let contactedBodies = player.physicsBody?.allContactedBodies() ?? []
-        let isTouchingSurface = contactedBodies.contains { body in
-            body.categoryBitMask == groundCategory || body.categoryBitMask == platformCategory
-        }
-        
-        // 3. Automatically adjust states based on real-time contact arrays
-        if isTouchingSurface {
-            // If we just landed from the air
-            if !isOnGround {
-                isOnGround = true
-                jumpCount = 0 // Safely reset jumps
-                player.removeAction(forKey: "jumping")
-                
-                if isMoving {
-                    if player.action(forKey: "walking") == nil { runAnimation() }
-                } else {
-                    player.texture = SKTexture(imageNamed: "walking000")
+      
+    
+            if canAdvanceToNextZone {
+                let zoneEndX = CGFloat(currentZone + 1) * size.width - 100
+                if player.position.x > zoneEndX {
+                    moveToNextZone()
                 }
             }
-        } else {
-            // Kirby has zero contact with floors/ledges (He jumped or fell off a ledge)
-            if isOnGround {
-                isOnGround = false
-                player.removeAction(forKey: "walking")
-                jumpAnimation() // Lock cleanly into jump/fall frames
-            }
-        }
+        
+            let isTouchingTrashNow = isTouchingTrash && nearbyTrash != nil
+
+           if isTouchingTrashNow {
+               if nearbyTrash == nil {
+                   if let trash = player.physicsBody?.allContactedBodies().first(where: {
+                       $0.categoryBitMask == trashCategory
+                   })?.node as? SKSpriteNode {
+                       nearbyTrash = trash
+                   }
+               }
+
+               if !showEatButton {
+                   showEatButton = true
+               }
+           } else {
+               nearbyTrash = nil
+
+               if showEatButton {
+                   showEatButton = false
+               }
+           }
+    }
+    
+    
+    func checkZoneProgress() {
+        guard enemiesDefeatedInZone >= enemiesRequiredPerZone[currentZone] else { return }
+        isZoneLocked = false
+        showCheckpointMessage()
     }
     
     //SKPhysicsContactDelegate delegate method
     func didBegin(_ contact: SKPhysicsContact) {
+        print("CONTACT DETECTED")
+        print(contact.bodyA.categoryBitMask)
+        print(contact.bodyB.categoryBitMask)
+        
         let collision = contact.bodyA.categoryBitMask | contact.bodyB.categoryBitMask
         
-        // 1. Proximity Detection: Kirby approaches Golden Trash
-        if collision == (playerCategory | trashCategory) {
-            let targetNode = (contact.bodyA.categoryBitMask == trashCategory) ? contact.bodyA.node : contact.bodyB.node
-            if let trashNode = targetNode as? SKSpriteNode {
+        let a = contact.bodyA
+        let b = contact.bodyB
+
+        if (a.categoryBitMask == playerCategory && b.categoryBitMask == trashCategory) ||
+           (a.categoryBitMask == trashCategory && b.categoryBitMask == playerCategory) {
+
+            print("KIRBY TOUCHED TRASH")
+
+            isTouchingTrash = true
+
+            if let trashNode = (a.categoryBitMask == trashCategory ? a.node : b.node) as? SKSpriteNode {
                 nearbyTrash = trashNode
-                DispatchQueue.main.async {
-                           self.showEatButton = true // Signals SwiftUI to reveal the button!
-                       }
+            }
+
+            DispatchQueue.main.async {
+                self.showEatButton = true
             }
         }
         
@@ -135,6 +178,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
                         let enemyPosition = enemy.position
                         enemy.removeFromParent()
                         dropGoldenTrash(at: enemyPosition)
+                        enemiesDefeatedInZone += 1
+                        checkZoneProgress()
                     } else {
                         enemy.userData?.setValue(newHP, forKey: "hp")
                         
@@ -144,6 +189,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
                         ])
                         enemy.run(flashRed)
                     }
+                    
                 }
                 player.physicsBody?.velocity = CGVector(dx: player.physicsBody?.velocity.dx ?? 0, dy: 320)
             } else {
@@ -157,17 +203,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         
         // NOTE: Old conflicting automatic trash opening logic has been completely removed from here!
         
-        // 4. Buff Collection: Kirby absorbs a Golden Star
-        if collision == (playerCategory | starCategory) {
-            targetNode?.removeFromParent()
-            
-            if Bool.random() {
-                kirbyAttack += 3
-            } else {
-                kirbyHealth += 25
-            }
-            updateHUD()
-        }
     }
 
     func didEnd(_ contact: SKPhysicsContact) {
@@ -179,12 +214,21 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
                 jumpAnimation()
             }
         }
-        if collision == (playerCategory | trashCategory) {
+        
+        let a = contact.bodyA
+        let b = contact.bodyB
+        
+        if (a.categoryBitMask == playerCategory && b.categoryBitMask == trashCategory) ||
+           (a.categoryBitMask == trashCategory && b.categoryBitMask == playerCategory) {
+
+            isTouchingTrash = false
             nearbyTrash = nil
-            DispatchQueue.main.async { // Fixed: Removed .push
+
+            DispatchQueue.main.async {
                 self.showEatButton = false
             }
         }
+        
     }
     
     func movePlayer(_ input: CGSize){
@@ -215,8 +259,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         // Move via physics velocity instead of altering position.x directly
         let moveSpeed: CGFloat = 5.0
         player.physicsBody?.velocity.dx = input.width * moveSpeed
-        
-        player.position.x = max(player.size.width / 2, min(player.position.x, size.width - player.size.width / 2))
+
         // Flip Kirby left/right depending on joystick direction
         if input.width > 0 {
             player.xScale = abs(player.xScale)
@@ -229,6 +272,20 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
             runAnimation()
         }
     }
+    
+    func moveToNextZone() {
+        guard currentZone < 4 else { return }
+
+        currentZone += 1
+        enemiesDefeatedInZone = 0
+        canAdvanceToNextZone = false
+
+        let targetX = CGFloat(currentZone) * size.width
+
+        let moveAction = SKAction.moveTo(x: targetX, duration: 1.2)
+        cameraNode.run(moveAction)
+    }
+    
     
     func jump() {
         // Enforce a strict max cap of 2 jumps
@@ -247,7 +304,47 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
             player.physicsBody?.velocity = CGVector(dx: currentXVelocity, dy: 350)
     }
     
-    func spawnEnemy(at position: CGPoint) {
+    func setupZones() {
+        let images = ["Zone1", "Zone2", "Zone3", "Zone4", "Zone5"]
+
+        for i in 0..<images.count {
+            let bg = SKSpriteNode(imageNamed: images[i])
+            bg.position = CGPoint(
+                x: CGFloat(i) * size.width + size.width / 2,
+                y: size.height / 2
+            )
+            bg.size = CGSize(width: size.width, height: size.height)
+            bg.zPosition = 0
+            addChild(bg)
+            zoneBackgrounds.append(bg)
+        }
+    }
+    
+    func showCheckpointMessage() {
+        let label = SKLabelNode(fontNamed: "AvenirNext-Bold")
+
+        label.text = "CHECKPOINT CLEARED!"
+        label.fontSize = 42
+        label.fontColor = .yellow
+        label.position = CGPoint(
+            x: cameraNode.position.x,
+            y: cameraNode.position.y
+        )
+
+        label.zPosition = 100
+
+        cameraNode.addChild(label)
+
+        label.run(
+            .sequence([
+                .wait(forDuration: 2),
+                .fadeOut(withDuration: 1),
+                .removeFromParent()
+            ])
+        )
+    }
+    
+    func Enemy(at position: CGPoint) {
         let enemy = SKSpriteNode(imageNamed: "KingDedede")
         enemy.userData = NSMutableDictionary()
         enemy.userData?.setValue(30, forKey: "hp") // Takes 3 stomps to destroy (30 hp in total)
@@ -327,15 +424,24 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         
         if roll <= 40.0 {
             // 40% Chance (0.0 to 40.0)
-            kirbyHealth -= 5
-            // If you have an explosion particle method, call it here:
-            // triggerExplosion(at: trashPos)
+            kirbyHealth -= 10
+            let boom = SKShapeNode(circleOfRadius: 40)
+            boom.position = player.position
+            boom.fillColor = .orange
+            boom.strokeColor = .red
+            boom.zPosition = 10
+            addChild(boom)
+
+            boom.run(.sequence([
+                .fadeOut(withDuration: 0.2),
+                .removeFromParent()
+            ]))
         } else if roll <= 70.0 {
-            // 30% Chance (40.1 to 70.0)
-            kirbyHealth += 10
+            // 30% heal
+            kirbyHealth += 30
         } else {
-            // 30% Chance (70.1 to 100.0)
-            kirbyAttack += 5
+            // 30% attack boost
+            kirbyAttack += 20
         }
         
         // Update your top bar text values
@@ -367,7 +473,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         //Tell the physics world that this body belongs to the "player"
         player.physicsBody?.categoryBitMask = playerCategory
         //Tell the physics world to alert "didBegin" when touching the ground
-        player.physicsBody?.contactTestBitMask = groundCategory | platformCategory | dededeCategory | trashCategory | starCategory
+        player.physicsBody?.contactTestBitMask = groundCategory | platformCategory | dededeCategory | trashCategory
         player.physicsBody?.collisionBitMask = groundCategory | platformCategory | dededeCategory
         player.texture = SKTexture(imageNamed: "walking000")
         addChild(player)
@@ -535,6 +641,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
     }
 
     private func dropGoldenTrash(at pos: CGPoint) {
+        print("TRASH DROPPED AT \(pos)")
+        
         let trash = SKSpriteNode(imageNamed: "goldenTrash")
         trash.size = CGSize(width: 45, height: 45)
         trash.position = pos
@@ -543,21 +651,9 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         trash.physicsBody?.isDynamic = false
         trash.physicsBody?.categoryBitMask = trashCategory
         trash.physicsBody?.contactTestBitMask = playerCategory
+        trash.physicsBody?.collisionBitMask = playerCategory
+        trash.physicsBody?.usesPreciseCollisionDetection = true
         addChild(trash)
-    }
-
-    private func dropGoldenStar(at pos: CGPoint) {
-        let star = SKSpriteNode(color: .cyan, size: CGSize(width: 25, height: 25))
-        star.position = pos
-        star.zPosition = 4
-        star.physicsBody = SKPhysicsBody(rectangleOf: star.size)
-        star.physicsBody?.isDynamic = false
-        star.physicsBody?.categoryBitMask = starCategory
-        star.physicsBody?.contactTestBitMask = playerCategory
-        
-        let floatUp = SKAction.moveBy(x: 0, y: 8, duration: 0.5)
-        star.run(SKAction.repeatForever(SKAction.sequence([floatUp, floatUp.reversed()])))
-        addChild(star)
     }
 
     private func triggerExplosionEffect(at pos: CGPoint) {
@@ -569,4 +665,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         addChild(explosion)
         explosion.run(SKAction.sequence([SKAction.fadeOut(withDuration: 0.2), SKAction.removeFromParent()]))
     }
+    
+
 }

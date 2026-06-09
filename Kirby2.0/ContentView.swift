@@ -35,6 +35,7 @@ struct ContentView: View {
                 }
                 .padding(.trailing, 40)
             }
+    
             .padding(.bottom, 40)
             .frame(maxHeight: .infinity, alignment: .bottom)
         }
