@@ -55,21 +55,20 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         setupGround()
    
         setupHUD()
-        setupPlatforms()
+   
        
        // setupBackground(imageName: "Dreamscape", duration: 5, zPos: 1, scale: 1)
         setupZones()
         
-        Enemy(at: CGPoint(x: size.width + 400, y: 180))
-        Enemy(at: CGPoint(x: size.width + 800, y: 250))
+        // --- ZONE 0 ENEMIES (Right on your starting screen platforms!) ---
+            Enemy(at: CGPoint(x: 400, y: 180))
+            Enemy(at: CGPoint(x: 750, y: 290))
 
-        Enemy(at: CGPoint(x: size.width * 2 + 300, y: 150))
-        Enemy(at: CGPoint(x: size.width * 2 + 700, y: 220))
-
-        Enemy(at: CGPoint(x: size.width * 3 + 500, y: 180))
-
-        Enemy(at: CGPoint(x: size.width * 4 + 600, y: 250))
-        
+        // --- FUTURE ZONE ENEMIES (Waiting off-screen) ---
+        Enemy(at: CGPoint(x: size.width + 300, y: 150))
+        Enemy(at: CGPoint(x: size.width + 700, y: 220))
+        Enemy(at: CGPoint(x: size.width * 2 + 500, y: 180))
+        Enemy(at: CGPoint(x: size.width * 3 + 600, y: 250))
         camera = cameraNode
         addChild(cameraNode)
         
@@ -78,55 +77,65 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
             y: size.height / 2
         )
 
+        // Activate the screen boundaries
+        updateMovementConstraints()
     }
+    
+    override func didChangeSize(_ oldSize: CGSize) {
+        super.didChangeSize(oldSize)
+        updateMovementConstraints()
+    }
+    
     
     override func update(_ currentTime: TimeInterval) {
         super.update(currentTime)
         movePlayer(joystickInput)
       
-    
-            if canAdvanceToNextZone {
-                let zoneEndX = CGFloat(currentZone + 1) * size.width - 100
-                if player.position.x > zoneEndX {
-                    moveToNextZone()
+        // --- 1. ZONE ADVANCEMENT CHECK ---
+        if canAdvanceToNextZone {
+            let zoneEndX = CGFloat(currentZone + 1) * size.width - 100
+            if player.position.x > zoneEndX {
+                moveToNextZone()
+            }
+        }
+        
+        // --- 2. TRASH EAT BUTTON DETECTION ---
+        let isTouchingTrashNow = isTouchingTrash && nearbyTrash != nil
+        if isTouchingTrashNow {
+            if nearbyTrash == nil {
+                if let trash = player.physicsBody?.allContactedBodies().first(where: {
+                    $0.categoryBitMask == trashCategory
+                })?.node as? SKSpriteNode {
+                    nearbyTrash = trash
                 }
             }
-        
-            let isTouchingTrashNow = isTouchingTrash && nearbyTrash != nil
 
-           if isTouchingTrashNow {
-               if nearbyTrash == nil {
-                   if let trash = player.physicsBody?.allContactedBodies().first(where: {
-                       $0.categoryBitMask == trashCategory
-                   })?.node as? SKSpriteNode {
-                       nearbyTrash = trash
-                   }
-               }
+            if !showEatButton {
+                showEatButton = true
+            }
+        } else {
+            nearbyTrash = nil
 
-               if !showEatButton {
-                   showEatButton = true
-               }
-           } else {
-               nearbyTrash = nil
-
-               if showEatButton {
-                   showEatButton = false
-               }
-           }
+            if showEatButton {
+                showEatButton = false
+            }
+        }
     }
     
     
     func checkZoneProgress() {
         guard enemiesDefeatedInZone >= enemiesRequiredPerZone[currentZone] else { return }
         isZoneLocked = false
+        canAdvanceToNextZone = true // FIX: Allows the update loop to trigger moveToNextZone()!
+        
+        // Refresh constraints so the right wall opens up!
+        updateMovementConstraints()
         showCheckpointMessage()
     }
     
     //SKPhysicsContactDelegate delegate method
     func didBegin(_ contact: SKPhysicsContact) {
-        print("CONTACT DETECTED")
-        print(contact.bodyA.categoryBitMask)
-        print(contact.bodyB.categoryBitMask)
+       
         
         let collision = contact.bodyA.categoryBitMask | contact.bodyB.categoryBitMask
         
@@ -135,8 +144,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
 
         if (a.categoryBitMask == playerCategory && b.categoryBitMask == trashCategory) ||
            (a.categoryBitMask == trashCategory && b.categoryBitMask == playerCategory) {
-
-            print("KIRBY TOUCHED TRASH")
 
             isTouchingTrash = true
 
@@ -165,39 +172,43 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         
         // 3. Combat Tracking: Kirby encounters King Dedede
         if collision == (playerCategory | dededeCategory) {
-            guard let enemy = targetNode as? SKSpriteNode else { return }
+            
+            // Identify exactly which node is the player and which is King Dedede
+            let enemyNode = (contact.bodyA.categoryBitMask == dededeCategory) ? contact.bodyA.node as? SKSpriteNode : contact.bodyB.node as? SKSpriteNode
+            
+            guard let enemy = enemyNode else { return }
             
             let isFalling = (player.physicsBody?.velocity.dy ?? 0) < -20
             let isAboveEnemy = player.position.y > (enemy.position.y + 15)
             
-            if isFalling && isAboveEnemy {
-                if let currentHP = enemy.userData?.value(forKey: "hp") as? Int {
-                    let newHP = currentHP - kirbyAttack
+            // CHECKS IF KIRBY'S CENTER Y IS SAFELY ABOVE DEDEDE'S LOWER HALF
+            if player.position.y > (enemy.position.y - 10){
+                // 1. Deal damage to King Dedede
+                if let hp = enemy.userData?.value(forKey: "hp") as? Int {
+                    let newHP = hp - 10 // Atk values from Kirby
+                    enemy.userData?.setValue(newHP, forKey: "hp")
+                    
+                    // Classic arcade white flash effect when hit
+                    let flash = SKAction.sequence([
+                        SKAction.colorize(with: .white, colorBlendFactor: 0.8, duration: 0.1),
+                        SKAction.colorize(withColorBlendFactor: 0.0, duration: 0.1)
+                    ])
+                    enemy.run(flash)
                     
                     if newHP <= 0 {
-                        let enemyPosition = enemy.position
                         enemy.removeFromParent()
-                        dropGoldenTrash(at: enemyPosition)
                         enemiesDefeatedInZone += 1
                         checkZoneProgress()
-                    } else {
-                        enemy.userData?.setValue(newHP, forKey: "hp")
-                        
-                        let flashRed = SKAction.sequence([
-                            SKAction.fadeAlpha(to: 0.3, duration: 0.1),
-                            SKAction.fadeAlpha(to: 1.0, duration: 0.1)
-                        ])
-                        enemy.run(flashRed)
                     }
-                    
                 }
-                player.physicsBody?.velocity = CGVector(dx: player.physicsBody?.velocity.dx ?? 0, dy: 320)
+                
+                // 2. Mario Style Bounce for Kirby to attack
+                // this launches Kirby up, breaking him out of any stuck animation state
+                player.physicsBody?.velocity.dy = 350
+                
             } else {
-                let isOnSameLevel = abs(player.position.y - enemy.position.y) < 40
-                if isOnSameLevel {
-                    kirbyHealth -= 15
-                    updateHUD()
-                }
+                // Kirby ran into Dedede from the side -> Kirby takes damage instead
+                takeDamage(amount: 10)
             }
         }
         
@@ -279,17 +290,21 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         currentZone += 1
         enemiesDefeatedInZone = 0
         canAdvanceToNextZone = false
+        isZoneLocked = true // Lock the new zone behind him
 
-        let targetX = CGFloat(currentZone) * size.width
-
+        // Refresh constraints for the new zone boundary box
+        updateMovementConstraints()
+        
+        // Move camera center to the middle of the new screen space
+        let targetX = (CGFloat(currentZone) * size.width) + (size.width / 2)
         let moveAction = SKAction.moveTo(x: targetX, duration: 1.2)
         cameraNode.run(moveAction)
     }
     
     
     func jump() {
-        // Enforce a strict max cap of 2 jumps
-        guard jumpCount < 10 else { return }
+        // Enforce a strict max cap of 12 jumps
+        guard jumpCount < 12 else { return }
 
         jumpCount += 1
         isOnGround = false // Kirby is now AIRBORNE!
@@ -353,7 +368,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         enemy.yScale = 0.8
         enemy.zPosition = 4
         
-        let interactiveRect = CGSize(width: enemy.size.width / 2, height: enemy.size.height)
+        // Change from enemy.size.width / 2 to a full, comfortable stomp width
+        let interactiveRect = CGSize(width: enemy.size.width * 0.8, height: enemy.size.height)
         enemy.physicsBody = SKPhysicsBody(rectangleOf: interactiveRect)
         enemy.physicsBody?.isDynamic = false // Stays perfectly on his platform
         enemy.physicsBody?.allowsRotation = false
@@ -362,14 +378,22 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         enemy.physicsBody?.contactTestBitMask = playerCategory
         addChild(enemy)
         
+        // --- FIX: AUTOMATIC PLATFORM GENERATION ---
+        let platformWidth: CGFloat = 350
+        let platformHeight: CGFloat = 20
+        // Places the ledge surface perfectly matching the feet of King Dedede
+        let platformY = position.y - (enemy.size.height / 2) - (platformHeight / 2)
+            
+        createLedge(at: CGPoint(x: position.x, y: platformY), size: CGSize(width: platformWidth, height: platformHeight))
+            
         // --- MARIO-STYLE AUTOMATIC PATROL LOGIC ---
-        let patrolDistance: CGFloat = 130  // Distance to travel left/right from center
-        let walkSpeed: TimeInterval = 2.5   // Time it takes to walk one direction
+        let patrolDistance: CGFloat = 110   // Caps the travel distance safely inside the 350w platform
+        let walkSpeed: TimeInterval = 2.5
             
         let moveLeft  = SKAction.moveBy(x: -patrolDistance, y: 0, duration: walkSpeed)
-        let flipRight = SKAction.run { enemy.xScale = 0.8 }  // Look Right
+        let flipRight = SKAction.run { enemy.xScale = 0.8 }
         let moveRight = SKAction.moveBy(x: patrolDistance * 2, y: 0, duration: walkSpeed * 2)
-        let flipLeft  = SKAction.run { enemy.xScale = -0.8 } // Look Left
+        let flipLeft  = SKAction.run { enemy.xScale = -0.8 }
         let moveBack  = SKAction.moveBy(x: -patrolDistance, y: 0, duration: walkSpeed)
             
         // Stitch it together into a looping routine
@@ -448,6 +472,22 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         updateHUD()
     }
     
+    func updateMovementConstraints() {
+        // Left Wall
+        let minX = CGFloat(currentZone) * size.width + player.size.width / 2
+        
+        // Right Wall (Locks to current screen if zone is locked, otherwise lets him roam)
+        let maxX = isZoneLocked ?
+            (CGFloat(currentZone + 1) * size.width - player.size.width / 2) :
+            (CGFloat(5) * size.width - player.size.width / 2)
+        
+        let rangeX = SKRange(lowerLimit: minX, upperLimit: maxX)
+        let constraint = SKConstraint.positionX(rangeX)
+        
+        // Apply natively to the player node
+        player.constraints = [constraint]
+    }
+    
     private func setupScene(){
         // set the scene background color to black
         backgroundColor = SKColor(.black)
@@ -460,15 +500,25 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
     
     
     private func setupPlayer(){
-
-        player.position = CGPoint(x: 200, y: 100) // Spawns cleanly above the floor line
-        player.setScale(0.7)
-        player.zPosition = 4
-     //   let interactiveRect = CGSize(width: player.size.width / 2, height: player.size.height)
-        player.physicsBody = SKPhysicsBody(rectangleOf: player.size)
+        player = SKSpriteNode(imageNamed: "walking000")
+        
+        // FIX: Raise the starting Y coordinate (e.g., from 100 to 180)
+        // so he drops cleanly onto the floor without clipping into it
+        player.position = CGPoint(x: 150, y: 180)
+        player.setScale(1)
+        player.zPosition = 5
+        
+        // let interactiveRect = CGSize(width: player.size.width / 2, height: player.size.height)
+        player.physicsBody = SKPhysicsBody(circleOfRadius: player.size.width / 2)
         player.physicsBody?.isDynamic = true
         player.physicsBody?.affectedByGravity = true
         player.physicsBody?.allowsRotation = false // Prevents kirby from rolling
+        player.physicsBody?.restitution = 0.0 // Prevents bouncy floor glitching
+        player.physicsBody?.friction = 0.2
+        
+        // FIX: Explicitly zero out any ghost velocities on spawn
+        player.physicsBody?.velocity = .zero
+        player.physicsBody?.angularVelocity = 0
         
         //Tell the physics world that this body belongs to the "player"
         player.physicsBody?.categoryBitMask = playerCategory
@@ -605,28 +655,29 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         hudLabel.text = "HP: \(kirbyHealth)  |  ATK: \(kirbyAttack)"
     }
 
-    func setupPlatforms() {
-        // Platform 1 (Under Enemy 1)
-        let platform1 = SKSpriteNode(color: .brown, size: CGSize(width: 250, height: 20))
-        platform1.position = CGPoint(x: 400, y: 120) // Positioned safely under the enemy at 162
-        platform1.zPosition = 2
-        platform1.physicsBody = SKPhysicsBody(rectangleOf: platform1.size)
-        platform1.physicsBody?.isDynamic = false // Stops it from falling down
-        platform1.physicsBody?.categoryBitMask = platformCategory
-        addChild(platform1)
-            
-        // Platform 2 (Under Enemy 2)
-        let platform2 = SKSpriteNode(color: .brown, size: CGSize(width: 250, height: 20))
-        platform2.position = CGPoint(x: 750, y: 230) // Positioned safely under the enemy at 272
-        platform2.zPosition = 2
-        platform2.physicsBody = SKPhysicsBody(rectangleOf: platform2.size)
-        platform2.physicsBody?.isDynamic = false
-        platform2.physicsBody?.categoryBitMask = platformCategory
-        addChild(platform2)
+    func takeDamage(amount: Int) {
+        // 1. Lower Kirby's health variable
+        // (Change 'playerHP' to whatever your health variable is called)
+        kirbyHealth -= amount
+        if kirbyHealth <= 0 {
+            kirbyHealth = 0
+            print("Game Over!")
+            // Trigger your game over logic here later!
+        }
         
-        // Stretched platform widths out to 350
-       // createLedge(at: CGPoint(x: 400, y: 120), size: CGSize(width: 350, height: 20))
-      //  createLedge(at: CGPoint(x: 750, y: 230), size: CGSize(width: 350, height: 20))
+        // 2. Update your HUD text immediately so the player sees the change
+        // (Change 'hudLabel' to whatever your SKLabelNode variable name is)
+        hudLabel.text = "HP: \(kirbyHealth) | ATK: 10"
+        
+        // 3. Visual feedback: Make Kirby blink red and get knocked back slightly
+        let turnRed = SKAction.colorize(with: .red, colorBlendFactor: 0.7, duration: 0.1)
+        let turnNormal = SKAction.colorize(withColorBlendFactor: 0.0, duration: 0.1)
+        let blinkSequence = SKAction.sequence([turnRed, turnNormal, turnRed, turnNormal])
+        player.run(blinkSequence)
+        
+        // Slight knockback so he doesn't instantly take damage again on the next frame
+        let pushDirection: CGFloat = (player.position.x < size.width / 2) ? -150 : 150
+        player.physicsBody?.velocity = CGVector(dx: pushDirection, dy: 200)
     }
 
     private func createLedge(at pos: CGPoint, size: CGSize) {
