@@ -90,6 +90,37 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
     override func update(_ currentTime: TimeInterval) {
         super.update(currentTime)
         movePlayer(joystickInput)
+        
+        
+        // If Kirby's vertical speed is 0, he is physically standing flat on something
+        if let dy = player.physicsBody?.velocity.dy {
+            
+            if isOnGround && dy < -5.0 {
+                isOnGround = false
+            }
+            
+            if isOnGround {
+                isOnGround = true
+                player.removeAction(forKey: "jumping")
+                
+                // If he's moving, make sure his legs are pumping
+                if isMoving {
+                    if player.action(forKey: "walking") == nil {
+                        runAnimation()
+                    }
+                } else {
+                    player.removeAction(forKey: "walking")
+                    player.texture = SKTexture(imageNamed: "walking000")
+                }
+            } else {
+                // Kirby is moving vertically through space (jumping or falling)
+                isOnGround = false
+                player.removeAction(forKey: "walking")
+                if player.action(forKey: "jumping") == nil {
+                    jumpAnimation()
+                }
+            }
+        }
       
         // --- 1. ZONE ADVANCEMENT CHECK ---
         if canAdvanceToNextZone {
@@ -156,7 +187,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
             }
         }
         
-        let targetNode = (contact.bodyA.categoryBitMask == playerCategory) ? contact.bodyB.node : contact.bodyA.node
         
         // 2. Solid Landings: Kirby hits Ground OR Platforms
         if collision == (playerCategory | groundCategory) || collision == (playerCategory | platformCategory) {
@@ -178,37 +208,73 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
             
             guard let enemy = enemyNode else { return }
             
-            let isFalling = (player.physicsBody?.velocity.dy ?? 0) < -20
-            let isAboveEnemy = player.position.y > (enemy.position.y + 15)
+            // Read current invicibility status from enemy
+            let isInvincible = enemy.userData?.value(forKey: "isInvincible") as? Bool ?? false
             
-            // CHECKS IF KIRBY'S CENTER Y IS SAFELY ABOVE DEDEDE'S LOWER HALF
-            if player.position.y > (enemy.position.y - 10){
-                // 1. Deal damage to King Dedede
-                if let hp = enemy.userData?.value(forKey: "hp") as? Int {
-                    let newHP = hp - 10 // Atk values from Kirby
-                    enemy.userData?.setValue(newHP, forKey: "hp")
+            // --- STRICT GEOMETRY CHECKS ---
+            // 1. Vertical check: Kirby's center must be cleanly above Dedede's upper crown
+            let isAboveEnemy = player.position.y > (enemy.position.y + 15)
+        
+            // 2. Horizontal check: Kirby's center X must align closely to Dedede's center X
+            let isSquarelyCentered = abs(player.position.x - enemy.position.x) < 40
+            
+            
+            
+            if isAboveEnemy && isSquarelyCentered {
+                // Only process the stomp if the frame shield is down
+                if !isInvincible {
+                    enemy.userData?.setValue(true, forKey: "isInvincible") // Activate shield instantly
                     
-                    // Classic arcade white flash effect when hit
-                    let flash = SKAction.sequence([
-                        SKAction.colorize(with: .white, colorBlendFactor: 0.8, duration: 0.1),
-                        SKAction.colorize(withColorBlendFactor: 0.0, duration: 0.1)
-                    ])
-                    enemy.run(flash)
-                    
-                    if newHP <= 0 {
-                        enemy.removeFromParent()
-                        enemiesDefeatedInZone += 1
-                        checkZoneProgress()
+                    if let hp = enemy.userData?.value(forKey: "hp") as? Int {
+                        let newHP = hp - 10
+                        enemy.userData?.setValue(newHP, forKey: "hp")
+                        
+                        // --- THE VISUAL FLASH FIX ---
+                        // 1. Stop the walking texture loop so it doesn't overwrite our color
+                        enemy.removeAction(forKey: "enemyWalk")
+                                        
+                        // 2. Build the flash sequence
+                        let flashWhite = SKAction.colorize(with: .white, colorBlendFactor: 0.9, duration: 0.1)
+                        let flashNormal = SKAction.colorize(withColorBlendFactor: 0.0, duration: 0.1)
+                                        
+                        // 3. Re-start his walking cycle after the flashing is done
+                        let restoreWalking = SKAction.run {
+                        var enemyAnimation = [SKTexture]()
+                        for i in 0...3 { enemyAnimation.append(SKTexture(imageNamed: "enemyWalk00\(i)")) }
+                        enemy.run(SKAction.repeatForever(SKAction.animate(with: enemyAnimation, timePerFrame: 0.15)), withKey: "enemyWalk")
+                        }
+                        if newHP <= 0 {
+                            dropGoldenTrash(at: enemy.position)
+                            
+                            enemy.removeFromParent()
+                            enemiesDefeatedInZone += 1
+                            checkZoneProgress()
+                        } else {
+                            // If still alive, clear the invincibility shield after 0.2 seconds
+                            
+                            let wait = SKAction.wait(forDuration: 0.2)
+                            let turnOffShield = SKAction.run{
+                                enemy.userData?.setValue(false, forKey: "isInvincible")
+                            }
+                            // FIX: Pack the colors, the walk restoration, and the shield toggle into one sequence!
+                            let hitSequence = SKAction.sequence([
+                                    flashWhite, flashNormal, flashWhite, flashNormal,
+                                    restoreWalking,
+                                    wait,
+                                    turnOffShield
+                            ])
+                            enemy.run(hitSequence)
+                        }
                     }
+                    
+                    // Mario style bounce for kirby to attack
+                    player.physicsBody?.velocity.dy = 350
                 }
-                
-                // 2. Mario Style Bounce for Kirby to attack
-                // this launches Kirby up, breaking him out of any stuck animation state
-                player.physicsBody?.velocity.dy = 350
-                
             } else {
-                // Kirby ran into Dedede from the side -> Kirby takes damage instead
-                takeDamage(amount: 10)
+                // If hitting from the sides/corners, Kirby takes damage (only if enemy isn't flashing)
+                if !isInvincible {
+                    takeDamage(amount: 10)
+                }
             }
         }
         
@@ -217,15 +283,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
     }
 
     func didEnd(_ contact: SKPhysicsContact) {
-        let collision = contact.bodyA.categoryBitMask | contact.bodyB.categoryBitMask
-        if collision == (playerCategory | groundCategory) || collision == (playerCategory | platformCategory) {
-            if isOnGround {
-                isOnGround = false
-                player.removeAction(forKey: "walking")
-                jumpAnimation()
-            }
-        }
-        
         let a = contact.bodyA
         let b = contact.bodyB
         
@@ -304,7 +361,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
     
     func jump() {
         // Enforce a strict max cap of 12 jumps
-        guard jumpCount < 12 else { return }
+        guard jumpCount < 7 else { return }
 
         jumpCount += 1
         isOnGround = false // Kirby is now AIRBORNE!
@@ -363,6 +420,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         let enemy = SKSpriteNode(imageNamed: "KingDedede")
         enemy.userData = NSMutableDictionary()
         enemy.userData?.setValue(30, forKey: "hp") // Takes 3 stomps to destroy (30 hp in total)
+        enemy.userData?.setValue(false, forKey: "isInvincible")
         enemy.position = position
         enemy.xScale = -0.8
         enemy.yScale = 0.8
@@ -404,7 +462,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         var enemyAnimation = [SKTexture]()
         for i in 0...3 { enemyAnimation.append(SKTexture(imageNamed: "enemyWalk00\(i)")) }
         if !enemyAnimation.isEmpty {
-            enemy.run(SKAction.repeatForever(SKAction.animate(with: enemyAnimation, timePerFrame: 0.15)))
+            enemy.run(SKAction.repeatForever(SKAction.animate(with: enemyAnimation, timePerFrame: 0.15)), withKey: "enemyWalk")
         }
     }
     
@@ -584,7 +642,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         
         //Define the floor physics values
         ground.physicsBody?.categoryBitMask = groundCategory
-        ground.physicsBody?.collisionBitMask = playerCategory
+        ground.physicsBody?.collisionBitMask = playerCategory | trashCategory
         addChild(ground)
     }
     
@@ -687,7 +745,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         ledge.physicsBody = SKPhysicsBody(rectangleOf: size)
         ledge.physicsBody?.isDynamic = false
         ledge.physicsBody?.categoryBitMask = platformCategory
-        ledge.physicsBody?.collisionBitMask = playerCategory
+        ledge.physicsBody?.collisionBitMask = playerCategory | trashCategory
         addChild(ledge)
     }
 
@@ -699,10 +757,10 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         trash.position = pos
         trash.zPosition = 4
         trash.physicsBody = SKPhysicsBody(rectangleOf: trash.size)
-        trash.physicsBody?.isDynamic = false
+        trash.physicsBody?.isDynamic = true
         trash.physicsBody?.categoryBitMask = trashCategory
         trash.physicsBody?.contactTestBitMask = playerCategory
-        trash.physicsBody?.collisionBitMask = playerCategory
+        trash.physicsBody?.collisionBitMask = groundCategory | platformCategory
         trash.physicsBody?.usesPreciseCollisionDetection = true
         addChild(trash)
     }
