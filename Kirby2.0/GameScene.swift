@@ -53,13 +53,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         setupScene()
         setupPlayer()
         setupGround()
-   
-        setupHUD()
-   
-       
-       // setupBackground(imageName: "Dreamscape", duration: 5, zPos: 1, scale: 1)
-        setupZones()
-        
+
         // --- ZONE 0 ENEMIES (Right on your starting screen platforms!) ---
             Enemy(at: CGPoint(x: 400, y: 180))
             Enemy(at: CGPoint(x: 750, y: 290))
@@ -71,12 +65,16 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         Enemy(at: CGPoint(x: size.width * 3 + 600, y: 250))
         camera = cameraNode
         addChild(cameraNode)
-        
+       
         cameraNode.position = CGPoint(
             x: size.width / 2,
             y: size.height / 2
         )
 
+        setupHUD()
+        // setupBackground(imageName: "Dreamscape", duration: 5, zPos: 1, scale: 1)
+         setupZones()
+        
         // Activate the screen boundaries
         updateMovementConstraints()
     }
@@ -701,12 +699,15 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
 
     
     private func setupHUD() {
-        hudLabel.text = "HP: \(kirbyHealth)  |  ATK: \(kirbyAttack)"
-        hudLabel.fontSize = 18
+        print("HUD setup running")
+        hudLabel.text = "HP: \(kirbyHealth) | ATK: \(kirbyAttack)"
+        hudLabel.fontSize = 40
         hudLabel.fontColor = .white
-        hudLabel.position = CGPoint(x: 150, y: size.height - 40)
-        hudLabel.zPosition = 10
-        addChild(hudLabel)
+        hudLabel.position = CGPoint(x: 0, y: 0)
+
+        cameraNode.addChild(hudLabel)
+
+        print("HUD parent:", String(describing: hudLabel.parent))
     }
 
     private func updateHUD() {
