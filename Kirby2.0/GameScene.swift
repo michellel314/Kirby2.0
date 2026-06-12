@@ -16,7 +16,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
     private var jumpCount = 0
     private var isMoving = false
     private var canMove = true
-    private var isOnGround = true // Tracks if Kirby is physically on surface
+    private var isOnGround = false // Tracks if Kirby is physically on surface
     private let playerCategory: UInt32 = 0x1 << 0
     private let groundCategory: UInt32 = 0x1 << 1
     
@@ -26,7 +26,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
     @Published var showEatButton = false
     private var nearbyTrash: SKSpriteNode? // Tracks the specific trash Kirby is next to
     private var isTouchingTrash = false
-
+    private var isKirbyInvincible = false // Tracks if Kirby is currently in his recovery window
     
     private var kirbyAttack = 10
     private var hudLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
@@ -60,15 +60,32 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
        // setupBackground(imageName: "Dreamscape", duration: 5, zPos: 1, scale: 1)
         setupZones()
         
-        // --- ZONE 0 ENEMIES (Right on your starting screen platforms!) ---
-            Enemy(at: CGPoint(x: 400, y: 180))
-            Enemy(at: CGPoint(x: 750, y: 290))
+        // --- ZONE 0 ENEMIES (Requires 2 | Index 0) ---
+        Enemy(at: CGPoint(x: size.width * 0.50, y: 180))
+        Enemy(at: CGPoint(x: size.width * 0.85, y: 290))
 
-        // --- FUTURE ZONE ENEMIES (Waiting off-screen) ---
-        Enemy(at: CGPoint(x: size.width + 300, y: 150))
-        Enemy(at: CGPoint(x: size.width + 700, y: 220))
-        Enemy(at: CGPoint(x: size.width * 2 + 500, y: 180))
-        Enemy(at: CGPoint(x: size.width * 3 + 600, y: 250))
+        // --- ZONE 1 ENEMIES (Requires 3  | Index 1) ---
+        Enemy(at: CGPoint(x: size.width * 1.35, y: 100))
+        Enemy(at: CGPoint(x: size.width * 1.5, y: 300))
+        Enemy(at: CGPoint(x: size.width * 1.8, y: 200))
+        
+        // --- Zone 2 Enemies (Requires 4, Index 2) ---
+        Enemy(at: CGPoint(x: size.width * 2.22, y: 200))
+        Enemy(at: CGPoint(x: size.width * 2.45, y: 340))
+        Enemy(at: CGPoint(x: size.width * 2.68, y: 130))
+        Enemy(at: CGPoint(x: size.width * 2.88, y: 240))
+        
+        // --- ZONE 3 ENEMIES (Requires 2 | Index 3) ---
+        Enemy(at: CGPoint(x: size.width * 3.3, y: 160))
+        Enemy(at: CGPoint(x: size.width * 3.7, y: 270))
+        
+        // --- ZONE 4 ENEMIES (Requires 5 | Index 4) ---
+        Enemy(at: CGPoint(x: size.width * 4.2, y: 150))
+        Enemy(at: CGPoint(x: size.width * 4.4, y: 290))
+        Enemy(at: CGPoint(x: size.width * 4.5, y: 200))
+        Enemy(at: CGPoint(x: size.width * 4.7, y: 260))
+        Enemy(at: CGPoint(x: size.width * 4.9, y: 180))
+        
         camera = cameraNode
         addChild(cameraNode)
         
@@ -93,17 +110,32 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         
         
         // If Kirby's vertical speed is 0, he is physically standing flat on something
-        if let dy = player.physicsBody?.velocity.dy {
+        if let bodies = player.physicsBody?.allContactedBodies(), let dy = player.physicsBody?.velocity.dy {
+            // 1. Scan all active physical point of contact underneath Kirby
+            let isTouchingSurface = bodies.contains { body in
+                let category = body.categoryBitMask
+                if category == groundCategory || category == platformCategory { return true }
+                
+                if category == dededeCategory {
+                    // Kirby is safely grounded on Dedede if his center is above his crown line
+                    if let enemyNode = body.node {
+                        return player.position.y > (enemyNode.position.y + 15)
+                    }
+                }
+                return false
+            }
             
-            if isOnGround && dy < -5.0 {
+            // 2. Kirby is grounded if touching a valid surface AND not actively blasting upward from a jump
+            if isTouchingSurface && dy <= 5.0 {
+                isOnGround = true
+            } else {
                 isOnGround = false
             }
             
+            // 3. FORCE CORRECT ANIMATION SYSTEM STATE
             if isOnGround {
-                isOnGround = true
                 player.removeAction(forKey: "jumping")
                 
-                // If he's moving, make sure his legs are pumping
                 if isMoving {
                     if player.action(forKey: "walking") == nil {
                         runAnimation()
@@ -113,8 +145,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
                     player.texture = SKTexture(imageNamed: "walking000")
                 }
             } else {
-                // Kirby is moving vertically through space (jumping or falling)
-                isOnGround = false
                 player.removeAction(forKey: "walking")
                 if player.action(forKey: "jumping") == nil {
                     jumpAnimation()
@@ -220,9 +250,10 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
             
             
             
-            if isAboveEnemy && isSquarelyCentered {
+            if isAboveEnemy {
                 // Only process the stomp if the frame shield is down
-                if !isInvincible {
+                if isSquarelyCentered && !isInvincible {
+                    
                     enemy.userData?.setValue(true, forKey: "isInvincible") // Activate shield instantly
                     
                     if let hp = enemy.userData?.value(forKey: "hp") as? Int {
@@ -245,7 +276,6 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
                         }
                         if newHP <= 0 {
                             dropGoldenTrash(at: enemy.position)
-                            
                             enemy.removeFromParent()
                             enemiesDefeatedInZone += 1
                             checkZoneProgress()
@@ -269,6 +299,13 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
                     
                     // Mario style bounce for kirby to attack
                     player.physicsBody?.velocity.dy = 350
+                    isOnGround = false // Force airborne state instantly on bounce!
+                } else {
+                    // --- WALKING/RESTING ON DEDEDE'S HEAD ---
+                    // If King Dedede is flashing or Kirby is off-center walking on his head, treat it like ground!
+                    jumpCount = 0
+                    isOnGround = true
+                    player.removeAction(forKey: "jumping")
                 }
             } else {
                 // If hitting from the sides/corners, Kirby takes damage (only if enemy isn't flashing)
@@ -437,7 +474,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         addChild(enemy)
         
         // --- FIX: AUTOMATIC PLATFORM GENERATION ---
-        let platformWidth: CGFloat = 350
+        let platformWidth: CGFloat = 220
         let platformHeight: CGFloat = 20
         // Places the ledge surface perfectly matching the feet of King Dedede
         let platformY = position.y - (enemy.size.height / 2) - (platformHeight / 2)
@@ -445,8 +482,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         createLedge(at: CGPoint(x: position.x, y: platformY), size: CGSize(width: platformWidth, height: platformHeight))
             
         // --- MARIO-STYLE AUTOMATIC PATROL LOGIC ---
-        let patrolDistance: CGFloat = 110   // Caps the travel distance safely inside the 350w platform
-        let walkSpeed: TimeInterval = 2.5
+        let patrolDistance: CGFloat = 60   // Caps the travel distance safely inside the 350w platform
+        let walkSpeed: TimeInterval = 1.8
             
         let moveLeft  = SKAction.moveBy(x: -patrolDistance, y: 0, duration: walkSpeed)
         let flipRight = SKAction.run { enemy.xScale = 0.8 }
@@ -704,9 +741,11 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         hudLabel.text = "HP: \(kirbyHealth)  |  ATK: \(kirbyAttack)"
         hudLabel.fontSize = 18
         hudLabel.fontColor = .white
-        hudLabel.position = CGPoint(x: 150, y: size.height - 40)
+        hudLabel.position = CGPoint(x: -size.width / 2 + 150, y: size.height / 2 - 40)
         hudLabel.zPosition = 10
-        addChild(hudLabel)
+        
+        // Add directly to cameraNode
+        cameraNode.addChild(hudLabel)
     }
 
     private func updateHUD() {
@@ -714,28 +753,41 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
     }
 
     func takeDamage(amount: Int) {
-        // 1. Lower Kirby's health variable
+        
+        // 1. Guard check: If Kirby is currently invincible, ignore all incoming hits
+        guard !isKirbyInvincible else { return }
+        
+        // 2. Activate invincibility instantly
+        isKirbyInvincible = true
+        
+        
+        // 3. Lower Kirby's health safely
         // (Change 'playerHP' to whatever your health variable is called)
         kirbyHealth -= amount
         if kirbyHealth <= 0 {
             kirbyHealth = 0
             print("Game Over!")
-            // Trigger your game over logic here later!
+           
         }
         
-        // 2. Update your HUD text immediately so the player sees the change
-        // (Change 'hudLabel' to whatever your SKLabelNode variable name is)
-        hudLabel.text = "HP: \(kirbyHealth) | ATK: 10"
+        hudLabel.text = "HP: \(kirbyHealth) | ATK: \(kirbyAttack)"
         
-        // 3. Visual feedback: Make Kirby blink red and get knocked back slightly
-        let turnRed = SKAction.colorize(with: .red, colorBlendFactor: 0.7, duration: 0.1)
-        let turnNormal = SKAction.colorize(withColorBlendFactor: 0.0, duration: 0.1)
-        let blinkSequence = SKAction.sequence([turnRed, turnNormal, turnRed, turnNormal])
-        player.run(blinkSequence)
-        
-        // Slight knockback so he doesn't instantly take damage again on the next frame
+        // 4. Knockback effect so Kirby physically separates from Dedede
         let pushDirection: CGFloat = (player.position.x < size.width / 2) ? -150 : 150
         player.physicsBody?.velocity = CGVector(dx: pushDirection, dy: 200)
+        
+        // 5. Visual feedback: Make Kirby blink red and get knocked back slightly
+        let fadeOut = SKAction.fadeOut(withDuration: 0.1)
+        let fadeIn = SKAction.fadeIn(withDuration: 0.1)
+        let flashSequence = SKAction.sequence([fadeOut, fadeIn])
+        let repeatFlash = SKAction.repeat(flashSequence, count: 4)
+        
+        // 6. Turn off invincibility automatically once the flashing actions finish
+        player.run(repeatFlash){ [weak self] in
+            self?.isKirbyInvincible = false
+            
+        }
+    
     }
 
     private func createLedge(at pos: CGPoint, size: CGSize) {
