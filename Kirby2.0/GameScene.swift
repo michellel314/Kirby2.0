@@ -19,14 +19,14 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
     private var isOnGround = true // Tracks if Kirby is physically on surface
     private let playerCategory: UInt32 = 0x1 << 0
     private let groundCategory: UInt32 = 0x1 << 1
-    
+
     
     // --- New Stats & HUD ---
     private var kirbyHealth = 100
     @Published var showEatButton = false
     private var nearbyTrash: SKSpriteNode? // Tracks the specific trash Kirby is next to
     private var isTouchingTrash = false
-
+    private var isKirbyInvincible = false
     
     private var kirbyAttack = 10
     private var hudLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
@@ -55,8 +55,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         setupGround()
 
         // --- ZONE 0 ENEMIES (Right on your starting screen platforms!) ---
-            Enemy(at: CGPoint(x: 400, y: 180))
-            Enemy(at: CGPoint(x: 750, y: 290))
+        Enemy(at: CGPoint(x: size.width * 0.4 , y: 180))
+        Enemy(at: CGPoint(x: size.width * 0.75, y: 290))
 
         // --- ZONE 1 ENEMIES (Requires 3  | Index 1) ---
         Enemy(at: CGPoint(x: size.width * 1.35, y: 100))
