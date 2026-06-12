@@ -16,7 +16,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
     private var jumpCount = 0
     private var isMoving = false
     private var canMove = true
-    private var isOnGround = false // Tracks if Kirby is physically on surface
+    private var isOnGround = true // Tracks if Kirby is physically on surface
     private let playerCategory: UInt32 = 0x1 << 0
     private let groundCategory: UInt32 = 0x1 << 1
     
@@ -26,7 +26,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
     @Published var showEatButton = false
     private var nearbyTrash: SKSpriteNode? // Tracks the specific trash Kirby is next to
     private var isTouchingTrash = false
-    private var isKirbyInvincible = false // Tracks if Kirby is currently in his recovery window
+
     
     private var kirbyAttack = 10
     private var hudLabel = SKLabelNode(fontNamed: "AvenirNext-Bold")
@@ -53,16 +53,10 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         setupScene()
         setupPlayer()
         setupGround()
-   
-        setupHUD()
-   
-       
-       // setupBackground(imageName: "Dreamscape", duration: 5, zPos: 1, scale: 1)
-        setupZones()
-        
-        // --- ZONE 0 ENEMIES (Requires 2 | Index 0) ---
-        Enemy(at: CGPoint(x: size.width * 0.50, y: 180))
-        Enemy(at: CGPoint(x: size.width * 0.85, y: 290))
+
+        // --- ZONE 0 ENEMIES (Right on your starting screen platforms!) ---
+            Enemy(at: CGPoint(x: 400, y: 180))
+            Enemy(at: CGPoint(x: 750, y: 290))
 
         // --- ZONE 1 ENEMIES (Requires 3  | Index 1) ---
         Enemy(at: CGPoint(x: size.width * 1.35, y: 100))
@@ -94,6 +88,10 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
             y: size.height / 2
         )
 
+        setupHUD()
+        // setupBackground(imageName: "Dreamscape", duration: 5, zPos: 1, scale: 1)
+         setupZones()
+        
         // Activate the screen boundaries
         updateMovementConstraints()
     }
