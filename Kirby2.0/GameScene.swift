@@ -491,7 +491,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
             
         // Stitch it together into a looping routine
         let patrolSequence = SKAction.sequence([moveLeft, flipRight, moveRight, flipLeft, moveBack])
-        enemy.run(SKAction.repeatForever(patrolSequence))
+        enemy.run(SKAction.repeatForever(patrolSequence), withKey: "enemyPatrol")
         
         // --- Keep his texture walking animation running concurrently ---
         var enemyAnimation = [SKTexture]()
@@ -499,6 +499,15 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         if !enemyAnimation.isEmpty {
             enemy.run(SKAction.repeatForever(SKAction.animate(with: enemyAnimation, timePerFrame: 0.15)), withKey: "enemyWalk")
         }
+        
+        // --- NEW: TRIGGER HAMMER ATTACK EVERY 3.5 SECONDS ---
+        let waitAction = SKAction.wait(forDuration: 3.5)
+        let attackAction = SKAction.run{ [weak self] in
+            self?.executeHammerSlam(on: enemy)
+            
+        }
+        
+        enemy.run(SKAction.repeatForever(SKAction.sequence([waitAction, attackAction])), withKey: "enemyAttackLoop")
     }
     
     func eatTrash() {
@@ -565,6 +574,87 @@ class GameScene: SKScene, SKPhysicsContactDelegate, ObservableObject{
         updateHUD()
     }
     
+    func executeHammerSlam(on enemy: SKSpriteNode){
+        // 1. Safety check: make sure Dedede hasn't already been defeated
+        guard enemy.parent != nil else { return }
+        
+        // 2. Freeze his movement actions instantly so he doesn't slide while swinging
+        enemy.removeAction(forKey: "enemyPatrol")
+        enemy.removeAction(forKey: "enemyWalk")
+        
+        // 3. Load the sprite sheet frames (0 to 5)
+        var slamFrames = [SKTexture]()
+        for i in 0...5{
+            slamFrames.append(SKTexture(imageNamed: "enemyAttack00\(i)"))
+        }
+        
+        guard slamFrames.count == 6 else { return }
+        
+        // 4. Split up actions so we can track the exact moment of impact (Frame 4 -> Frame 5 Smear)
+        let windUpAnimation = SKAction.animate(with: Array(slamFrames[0...3]), timePerFrame: 0.12)
+        let strikeAnimation = SKAction.animate(with: [slamFrames[4]], timePerFrame: 0.10)
+        let recoveryAnimation = SKAction.animate(with: [slamFrames[5]], timePerFrame: 0.25)
+        
+        // 5. This block runs the EXACT millisecond the hammer strikes the platform
+        let damageCheck = SKAction.run{ [weak self] in
+            guard let self = self else { return }
+            
+            // Calculate the attack range offset based on which direction Dedede is facing
+            let isFacingLeft = enemy.xScale < 0
+            let attackReach: CGFloat = 65 // Total horizontal reach of the giant hammer
+            
+            // The center of the explosion impact zone
+            let impactX = isFacingLeft ? (enemy.position.x - attackReach) : (enemy.position.x + attackReach)
+            
+            // Check the structural distance between Kirby and the impact zone center
+            let deltaX = abs(self.player.position.x - impactX)
+            let deltaY = abs(self.player.position.y - enemy.position.y)
+            
+            // Hitbox parameters: within 50 pixels horizontally, and relatively level on Y axis
+            if deltaX < 55 && deltaY < 60 {
+                self.takeDamage(amount: 20) // The hammer chunks 25 HP
+            }
+            
+            // Juice effect: Shake the camera slightly
+            let shakeLeft = SKAction.moveBy(x: -5, y: 0, duration: 0.05)
+            let shakeRight = SKAction.moveBy(x: 5, y: 0, duration: 0.05)
+            self.cameraNode.run(SKAction.sequence([shakeLeft, shakeRight, shakeLeft, shakeRight]))
+            
+        }
+        
+        // 6. This block hooks back into your original system to turn walking back on
+        let restorePatrol = SKAction.run{ [weak self] in
+            guard let self = self, enemy.parent != nil else { return }
+            
+            // Re-compile your patrol rules dynamically
+            let patrolDistance: CGFloat = 60
+            let walkSpeed: TimeInterval = 1.8
+            let moveLeft = SKAction.moveBy(x: -patrolDistance, y: 0, duration: walkSpeed)
+            let flipRight = SKAction.run { enemy.xScale = 0.8 }
+            let moveRight = SKAction.moveBy(x: patrolDistance * 2, y: 0, duration: walkSpeed * 2)
+            let flipLeft = SKAction.run{ enemy.xScale = -0.8 }
+            let moveBack = SKAction.moveBy(x: -patrolDistance, y: 0, duration: walkSpeed)
+            
+            let patrolSequence = SKAction.sequence([moveLeft, flipRight, moveRight, flipLeft, moveBack])
+            enemy.run(SKAction.repeatForever(patrolSequence), withKey: "enemyPatrol")
+            
+            var enemyAnimation = [SKTexture]()
+            for i in 0...3 { enemyAnimation.append(SKTexture(imageNamed: "enemyWalk00\(i)")) }
+            enemy.run(SKAction.repeatForever(SKAction.animate(with: enemyAnimation, timePerFrame: 0.15)), withKey: "enemyWalk")
+            
+        }
+        
+        // 7. Piece the entire attack sequence together step-by-step
+        let fullAttackSequence = SKAction.sequence([
+            windUpAnimation,    // Frames 0-3: Dedede rears back
+            strikeAnimation,    // Frame 4: SMASH DOWN
+            damageCheck,        // Instant mathematical check + screen shake
+            recoveryAnimation,  // Frame 5: Resting/lifting hammer back up
+            restorePatrol       // Re-engage movement routines cleanly
+        ])
+            
+        enemy.run(fullAttackSequence)
+    }
     func updateMovementConstraints() {
         // Left Wall
         let minX = CGFloat(currentZone) * size.width + player.size.width / 2
